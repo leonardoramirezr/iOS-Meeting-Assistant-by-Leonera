@@ -1,0 +1,46 @@
+name: MeetingAssistant
+
+options:
+  deploymentTarget:
+    iOS: "17.0"
+  createIntermediateGroups: true
+
+settings:
+  base:
+    # Identificadores y versión. El workflow los sobrescribe pasándolos como
+    # build settings a xcodebuild (APP_BUNDLE_ID=..., MARKETING_VERSION=...).
+    APP_BUNDLE_ID: com.leonardoramirezr.meetingassistantbyleonera
+    MARKETING_VERSION: "0.1.0"
+    CURRENT_PROJECT_VERSION: "1"
+    DEVELOPMENT_TEAM: ""
+    CODE_SIGN_STYLE: Automatic
+    SWIFT_VERSION: "5.0"
+
+targets:
+  MeetingAssistant:
+    type: application
+    platform: iOS
+    sources:
+      - path: MeetingAssistant
+    settings:
+      base:
+        PRODUCT_NAME: MeetingAssistant
+        PRODUCT_BUNDLE_IDENTIFIER: $(APP_BUNDLE_ID)
+        INFOPLIST_FILE: Config/Info.plist
+        GENERATE_INFOPLIST_FILE: NO
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
+        TARGETED_DEVICE_FAMILY: "1"
+        SUPPORTS_MACCATALYST: NO
+        SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD: NO
+        ENABLE_PREVIEWS: YES
+
+schemes:
+  MeetingAssistant:
+    build:
+      targets:
+        MeetingAssistant: all
+    run:
+      config: Debug
+    archive:
+      config: Release
