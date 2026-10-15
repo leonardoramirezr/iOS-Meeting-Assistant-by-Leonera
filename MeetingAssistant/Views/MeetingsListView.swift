@@ -20,13 +20,26 @@ struct MeetingsListView: View {
                         )
                     }
                 }
-                if let authError = model.processor.authError {
+                ForEach(LLMProvider.allCases) { provider in
+                    if let authError = model.processor.authErrors[provider] {
+                        Section {
+                            NoticeRow(
+                                systemImage: "exclamationmark.triangle.fill",
+                                title: provider == .groq ? "Procesamiento con Groq detenido" : "Procesamiento con Google detenido",
+                                message: authError,
+                                actionTitle: "Revisar API key",
+                                action: { showSettings = true }
+                            )
+                        }
+                    }
+                }
+                if AppSettings.llmProvider == .google, model.googleAPIKey.isEmpty {
                     Section {
                         NoticeRow(
-                            systemImage: "exclamationmark.triangle.fill",
-                            title: "Transcripción detenida",
-                            message: authError,
-                            actionTitle: "Revisar API key",
+                            systemImage: "key.fill",
+                            title: "Falta la API key de Google",
+                            message: "El LLM seleccionado es de Google: configura su API key para generar resúmenes y minutas.",
+                            actionTitle: "Configurar",
                             action: { showSettings = true }
                         )
                     }

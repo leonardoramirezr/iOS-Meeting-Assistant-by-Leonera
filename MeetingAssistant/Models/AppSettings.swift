@@ -44,6 +44,61 @@ enum TranscriptionLanguage: String, CaseIterable, Identifiable {
     }
 }
 
+/// Proveedor de la API compatible con OpenAI que se usa para el LLM.
+enum LLMProvider: String, CaseIterable, Identifiable, Codable {
+    case groq
+    case google
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .groq: return "Groq"
+        case .google: return "Google"
+        }
+    }
+
+    var host: String {
+        switch self {
+        case .groq: return "api.groq.com"
+        case .google: return "generativelanguage.googleapis.com"
+        }
+    }
+
+    /// Base de la API compatible con OpenAI (termina en "/").
+    var baseURL: URL {
+        switch self {
+        case .groq: return URL(string: "https://api.groq.com/openai/v1/")!
+        case .google: return URL(string: "https://generativelanguage.googleapis.com/v1beta/openai/")!
+        }
+    }
+
+    var chatURL: URL { URL(string: "chat/completions", relativeTo: baseURL)!.absoluteURL }
+    var modelsURL: URL { URL(string: "models", relativeTo: baseURL)!.absoluteURL }
+
+    /// Cuenta del llavero donde se guarda su API key.
+    var keychainAccount: String {
+        switch self {
+        case .groq: return "groq-api-key"
+        case .google: return "google-api-key"
+        }
+    }
+
+    var keyPlaceholder: String {
+        switch self {
+        case .groq: return "gsk_…"
+        case .google: return "AIza…"
+        }
+    }
+
+    var consoleHint: String {
+        switch self {
+        case .groq: return "console.groq.com/keys"
+        case .google: return "aistudio.google.com/apikey"
+        }
+    }
+}
+
 /// Forma de procesar la minuta. Las opciones son mutuamente excluyentes.
 enum ProcessingMode: String, CaseIterable, Identifiable, Codable {
     /// Lógica original: todas las transcripciones concatenadas en una sola petición.
@@ -111,7 +166,11 @@ enum QuotaPause: Double, CaseIterable, Identifiable {
 enum AppSettings {
     enum Key {
         static let transcriptionModel = "settings.transcriptionModel"
+        /// Modelo LLM de Groq (clave histórica).
         static let llmModel = "settings.llmModel"
+        static let googleLLMModel = "settings.googleLLMModel"
+        static let llmProvider = "settings.llmProvider"
+        static let fetchedGoogleModels = "settings.fetchedGoogleModels"
         static let chunkLength = "settings.chunkLength"
         static let language = "settings.language"
         static let minutesPrompt = "settings.minutesPrompt"
@@ -130,6 +189,8 @@ enum AppSettings {
 
     static let defaultTranscriptionModel = "whisper-large-v3-turbo"
     static let defaultLLMModel = "openai/gpt-oss-120b"
+    static let defaultGoogleLLMModel = "gemini-2.5-flash"
+    static let defaultLLMProvider = LLMProvider.groq.rawValue
     static let defaultChunkLength = ChunkLength.five.rawValue
     static let defaultLanguage = TranscriptionLanguage.spanish.rawValue
 
@@ -151,6 +212,12 @@ enum AppSettings {
     static let suggestedTranscriptionModels = [
         "whisper-large-v3-turbo",
         "whisper-large-v3",
+    ]
+
+    static let suggestedGoogleModels = [
+        "gemini-2.5-flash",
+        "gemini-2.5-pro",
+        "gemini-2.5-flash-lite",
     ]
 
     static let suggestedLLMModels = [
@@ -236,6 +303,8 @@ enum AppSettings {
         defaults.register(defaults: [
             Key.transcriptionModel: defaultTranscriptionModel,
             Key.llmModel: defaultLLMModel,
+            Key.googleLLMModel: defaultGoogleLLMModel,
+            Key.llmProvider: defaultLLMProvider,
             Key.chunkLength: defaultChunkLength,
             Key.language: defaultLanguage,
             Key.minutesPrompt: defaultMinutesPrompt,
@@ -252,8 +321,22 @@ enum AppSettings {
         nonEmpty(defaults.string(forKey: Key.transcriptionModel)) ?? defaultTranscriptionModel
     }
 
+    static var llmProvider: LLMProvider {
+        LLMProvider(rawValue: defaults.string(forKey: Key.llmProvider) ?? "") ?? .groq
+    }
+
+    /// Modelo LLM del proveedor seleccionado.
     static var llmModel: String {
-        nonEmpty(defaults.string(forKey: Key.llmModel)) ?? defaultLLMModel
+        llmModel(for: llmProvider)
+    }
+
+    static func llmModel(for provider: LLMProvider) -> String {
+        switch provider {
+        case .groq:
+            return nonEmpty(defaults.string(forKey: Key.llmModel)) ?? defaultLLMModel
+        case .google:
+            return nonEmpty(defaults.string(forKey: Key.googleLLMModel)) ?? defaultGoogleLLMModel
+        }
     }
 
     static var chunkLength: TimeInterval {

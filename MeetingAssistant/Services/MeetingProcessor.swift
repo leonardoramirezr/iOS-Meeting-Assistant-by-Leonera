@@ -7,13 +7,13 @@ import Observation
 final class MeetingProcessor {
     private(set) var isProcessingQueue = false
     private(set) var isSummarizing = false
-    /// Último rechazo de la API key; las colas se detienen hasta que cambie.
-    private(set) var authError: String? = nil
+    /// Último rechazo de la API key de cada proveedor; su cola se detiene hasta que la key cambie.
+    private(set) var authErrors: [LLMProvider: String] = [:]
     /// Fin de la pausa por límite de cuota (429). Se guarda para reanudar tras reiniciar la app.
     private(set) var pausedUntil: Date? = nil
     /// Motivo de la pausa en curso (cuota agotada o pausa preventiva).
     private(set) var pauseReason: String? = nil
-    @ObservationIgnored private var apiKey = ""
+    @ObservationIgnored private var apiKeys: [LLMProvider: String] = [:]
     @ObservationIgnored private var resumeTask: Task<Void, Never>? = nil
     @ObservationIgnored private var generatingMinutes: Set<UUID> = []
 
@@ -32,16 +32,35 @@ final class MeetingProcessor {
         }
     }
 
-    func updateAPIKey(_ key: String) {
-        if key != apiKey {
-            apiKey = key
-            authError = nil
+    func updateAPIKey(_ key: String, for provider: LLMProvider) {
+        if key != apiKeys[provider, default: ""] {
+            apiKeys[provider] = key
+            authErrors[provider] = nil
         }
         kick()
     }
 
-    private var hasUsableKey: Bool {
-        !apiKey.isEmpty && authError == nil
+    private func key(for provider: LLMProvider) -> String {
+        apiKeys[provider, default: ""]
+    }
+
+    private func hasUsableKey(_ provider: LLMProvider) -> Bool {
+        !key(for: provider).isEmpty && authErrors[provider] == nil
+    }
+
+    /// La transcripción (Whisper) siempre va a Groq.
+    private var canTranscribe: Bool { hasUsableKey(.groq) }
+
+    /// Resúmenes y minuta usan el proveedor de LLM seleccionado.
+    private var canUseLLM: Bool { hasUsableKey(AppSettings.llmProvider) }
+
+    private func llmClient() -> GroqClient {
+        let provider = AppSettings.llmProvider
+        return GroqClient(apiKey: key(for: provider), provider: provider)
+    }
+
+    private func markAuthError(_ error: GroqAPIError) {
+        authErrors[error.provider] = error.localizedDescription
     }
 
     var isPaused: Bool {
@@ -55,7 +74,7 @@ final class MeetingProcessor {
     /// Se llama al abrir la app, al cambiar la API key y cuando termina una pausa.
     func kick() {
         clearExpiredPause()
-        guard hasUsableKey, !isPaused else { return }
+        guard !isPaused else { return }
         kickTranscription()
         kickSummaries()
         for meeting in store.meetings where meeting.minutesStatus == .queued {
@@ -64,7 +83,7 @@ final class MeetingProcessor {
     }
 
     private func kickTranscription() {
-        guard !isProcessingQueue, hasUsableKey, !isPaused, store.nextPendingChunk() != nil else { return }
+        guard !isProcessingQueue, canTranscribe, !isPaused, store.nextPendingChunk() != nil else { return }
         isProcessingQueue = true
         Task {
             await drainQueue()
@@ -159,7 +178,7 @@ final class MeetingProcessor {
     private func drainQueue() async {
         let activity = BackgroundActivity(name: "transcription")
         defer { activity.end() }
-        while hasUsableKey, !isPaused, let job = store.nextPendingChunk() {
+        while canTranscribe, !isPaused, let job = store.nextPendingChunk() {
             await transcribe(job)
         }
         // Sin `await` entre la última comprobación y aquí: `kick()` no puede colarse.
@@ -167,7 +186,7 @@ final class MeetingProcessor {
     }
 
     private func transcribe(_ job: ChunkJob) async {
-        let key = apiKey
+        let groqKey = key(for: .groq)
         let model = AppSettings.transcriptionModel
         let language = AppSettings.transcriptionLanguage
         store.updateChunk(job.meetingID, index: job.index) { chunk in
@@ -184,7 +203,7 @@ final class MeetingProcessor {
             return
         }
 
-        let client = GroqClient(apiKey: key)
+        let client = GroqClient(apiKey: groqKey)
         var attempt = 0
         while true {
             attempt += 1
@@ -201,9 +220,9 @@ final class MeetingProcessor {
                 kickSummaries()
                 checkCompletion(job.meetingID)
                 return
-            } catch let error as GroqAPIError where error.statusCode == 401 {
+            } catch let error as GroqAPIError where error.isAuthError {
                 // Con la key rechazada no tiene sentido seguir: el bloque vuelve a la cola.
-                authError = error.localizedDescription
+                markAuthError(error)
                 store.updateChunk(job.meetingID, index: job.index) { chunk in
                     chunk.status = .pending
                     chunk.error = error.localizedDescription
@@ -311,7 +330,7 @@ final class MeetingProcessor {
     }
 
     func kickSummaries() {
-        guard !isSummarizing, hasUsableKey, !isPaused, nextSummaryJob() != nil else { return }
+        guard !isSummarizing, canUseLLM, !isPaused, nextSummaryJob() != nil else { return }
         isSummarizing = true
         Task {
             await drainSummaries()
@@ -321,7 +340,7 @@ final class MeetingProcessor {
     private func drainSummaries() async {
         let activity = BackgroundActivity(name: "summaries")
         defer { activity.end() }
-        while hasUsableKey, !isPaused, let job = nextSummaryJob() {
+        while canUseLLM, !isPaused, let job = nextSummaryJob() {
             await run(job)
             checkCompletion(job.meetingID)
         }
@@ -406,7 +425,7 @@ final class MeetingProcessor {
         }
 
         let model = AppSettings.llmModel
-        let client = GroqClient(apiKey: apiKey)
+        let client = llmClient()
         var attempt = 0
         while true {
             attempt += 1
@@ -417,8 +436,8 @@ final class MeetingProcessor {
                 saveSummary(SegmentSummary(chunkIndices: indices, text: result.content, createdAt: Date(), model: model),
                       in: job.meetingID, plan: plan)
                 return
-            } catch let error as GroqAPIError where error.statusCode == 401 {
-                authError = error.localizedDescription
+            } catch let error as GroqAPIError where error.isAuthError {
+                markAuthError(error)
                 return
             } catch {
                 if let quotaError = Self.isQuotaError(error) {
@@ -470,10 +489,11 @@ final class MeetingProcessor {
     func generateMinutes(_ meetingID: UUID) {
         guard let meeting = store.meeting(meetingID),
               meeting.minutesStatus != .generating, !generatingMinutes.contains(meetingID) else { return }
-        guard !apiKey.isEmpty else {
+        let provider = AppSettings.llmProvider
+        guard !key(for: provider).isEmpty else {
             store.update(meetingID) { meeting in
                 meeting.minutesStatus = .failed
-                meeting.minutesError = "Configura tu API key de Groq en Ajustes."
+                meeting.minutesError = "Configura tu API key de \(provider.label) en Ajustes."
             }
             return
         }
@@ -494,7 +514,7 @@ final class MeetingProcessor {
 
     private func sendMinutes(_ meetingID: UUID, plan: SummaryPlan) {
         guard let meeting = store.meeting(meetingID), !generatingMinutes.contains(meetingID) else { return }
-        guard hasUsableKey, !isPaused else {
+        guard canUseLLM, !isPaused else {
             store.update(meetingID) { meeting in
                 meeting.minutesStatus = .queued
             }
@@ -502,7 +522,7 @@ final class MeetingProcessor {
         }
 
         let model = AppSettings.llmModel
-        let client = GroqClient(apiKey: apiKey)
+        let client = llmClient()
         let message = AppSettings.minutesPrompt + "\n\n" + meeting.minutesInput(for: plan)
         let prepared: PreparedChatRequest
         do {
@@ -537,13 +557,16 @@ final class MeetingProcessor {
                     store.update(meetingID) { meeting in
                         meeting.minutes = result.content
                         meeting.minutesStatus = .done
-                        meeting.minutesModel = model
+                        meeting.minutesModel = "\(model) (\(client.provider.label))"
                         meeting.minutesGeneratedAt = Date()
                         meeting.lastLLMExchange?.response = result.rawResponse
                     }
                     return
                 } catch {
                     let raw = (error as? GroqAPIError)?.rawResponse
+                    if let authError = error as? GroqAPIError, authError.isAuthError {
+                        markAuthError(authError)
+                    }
                     if let quotaError = Self.isQuotaError(error) {
                         // Se vuelve a intentar sola al terminar la pausa.
                         store.update(meetingID) { meeting in

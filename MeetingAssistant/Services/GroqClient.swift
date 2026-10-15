@@ -5,8 +5,9 @@ struct GroqModel: Decodable, Hashable {
     let active: Bool?
 }
 
-/// Error HTTP devuelto por la API de Groq.
+/// Error HTTP devuelto por la API (Groq o Google).
 struct GroqAPIError: LocalizedError {
+    var provider: LLMProvider = .groq
     let statusCode: Int
     let message: String
     let retryAfter: TimeInterval?
@@ -14,18 +15,23 @@ struct GroqAPIError: LocalizedError {
 
     var errorDescription: String? {
         switch statusCode {
-        case 401:
-            return "Groq rechazó la API key (401): \(message)"
+        case 401, 403:
+            return "\(provider.label) rechazó la API key (\(statusCode)): \(message)"
         case 413:
             return "La petición es demasiado grande para este modelo o plan (413): \(message)"
         case 429:
-            return "Límite de uso de Groq alcanzado (429): \(message)"
+            return "Límite de uso de \(provider.label) alcanzado (429): \(message)"
         default:
-            return "Groq respondió \(statusCode): \(message)"
+            return "\(provider.label) respondió \(statusCode): \(message)"
         }
     }
 
     var isRetryable: Bool { statusCode == 429 || statusCode >= 500 }
+    /// Google responde 400 "API key not valid" con una key incorrecta.
+    var isAuthError: Bool {
+        statusCode == 401 || statusCode == 403
+            || (statusCode == 400 && message.localizedCaseInsensitiveContains("API key"))
+    }
 }
 
 /// Petición de chat ya construida, junto con su representación HTTP literal.
@@ -97,12 +103,10 @@ struct RateLimitInfo {
     }
 }
 
-/// Cliente mínimo de la API compatible con OpenAI de Groq.
+/// Cliente mínimo de una API compatible con OpenAI (Groq o Google).
+/// La transcripción (`audio/transcriptions`) solo existe en Groq.
 struct GroqClient {
-    static let host = "api.groq.com"
-    static let modelsURL = URL(string: "https://api.groq.com/openai/v1/models")!
     static let transcriptionsURL = URL(string: "https://api.groq.com/openai/v1/audio/transcriptions")!
-    static let chatURL = URL(string: "https://api.groq.com/openai/v1/chat/completions")!
 
     private static let session: URLSession = {
         let configuration = URLSessionConfiguration.default
@@ -112,16 +116,30 @@ struct GroqClient {
     }()
 
     let apiKey: String
+    var provider: LLMProvider = .groq
 
     // MARK: Modelos
 
+    /// Modelos disponibles (`GET <base>/models`). En Google, si esa ruta no existe se
+    /// prueba `<base>/v1/models`; el prefijo `models/` de los IDs se quita.
     func listModels() async throws -> [GroqModel] {
-        var request = URLRequest(url: Self.modelsURL)
+        do {
+            return try await listModels(at: provider.modelsURL)
+        } catch let error as GroqAPIError where provider == .google && error.statusCode == 404 {
+            return try await listModels(at: URL(string: "v1/models", relativeTo: provider.baseURL)!.absoluteURL)
+        }
+    }
+
+    private func listModels(at url: URL) async throws -> [GroqModel] {
+        var request = URLRequest(url: url)
         request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
         let (data, response) = try await Self.session.data(for: request)
-        try Self.validate(data: data, response: response)
+        try Self.validate(data: data, response: response, provider: provider)
         struct ModelList: Decodable { let data: [GroqModel] }
-        return try JSONDecoder().decode(ModelList.self, from: data).data
+        return try JSONDecoder().decode(ModelList.self, from: data).data.map { model in
+            let id = model.id.hasPrefix("models/") ? String(model.id.dropFirst("models/".count)) : model.id
+            return GroqModel(id: id, active: model.active)
+        }
     }
 
     // MARK: Transcripción
@@ -155,7 +173,7 @@ struct GroqClient {
         request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
 
         let (data, response) = try await Self.session.upload(for: request, from: body)
-        try Self.validate(data: data, response: response)
+        try Self.validate(data: data, response: response, provider: .groq)
         struct Transcription: Decodable { let text: String }
         let text = try JSONDecoder().decode(Transcription.self, from: data).text
         return TranscriptionResult(text: text, rateLimit: RateLimitInfo(response: response))
@@ -180,15 +198,15 @@ struct GroqClient {
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
         let body = try encoder.encode(ChatBody(model: model, messages: messages, temperature: temperature))
 
-        var request = URLRequest(url: Self.chatURL)
+        var request = URLRequest(url: provider.chatURL)
         request.httpMethod = "POST"
         request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = body
 
         let raw = [
-            "POST \(Self.chatURL.path) HTTP/1.1",
-            "Host: \(Self.host)",
+            "POST \(provider.chatURL.path) HTTP/1.1",
+            "Host: \(provider.host)",
             "Authorization: Bearer \(Self.redacted(apiKey))",
             "Content-Type: application/json",
             "Content-Length: \(body.count)",
@@ -202,7 +220,7 @@ struct GroqClient {
     func send(_ prepared: PreparedChatRequest) async throws -> ChatResult {
         let (data, response) = try await Self.session.data(for: prepared.urlRequest)
         let raw = Self.rawResponse(data: data, response: response)
-        try Self.validate(data: data, response: response, raw: raw)
+        try Self.validate(data: data, response: response, raw: raw, provider: provider)
 
         struct Completion: Decodable {
             struct Choice: Decodable {
@@ -214,7 +232,7 @@ struct GroqClient {
         let completion = try JSONDecoder().decode(Completion.self, from: data)
         let content = Self.stripReasoning(completion.choices.first?.message.content ?? "")
         guard !content.isEmpty else {
-            throw GroqAPIError(statusCode: 200, message: "El modelo devolvió una respuesta vacía.", retryAfter: nil, rawResponse: raw)
+            throw GroqAPIError(provider: provider, statusCode: 200, message: "El modelo devolvió una respuesta vacía.", retryAfter: nil, rawResponse: raw)
         }
         return ChatResult(content: content, rawResponse: raw, rateLimit: RateLimitInfo(response: response))
     }
@@ -281,16 +299,17 @@ struct GroqClient {
         return String(decoding: pretty, as: UTF8.self)
     }
 
-    private static func validate(data: Data, response: URLResponse, raw: String? = nil) throws {
+    private static func validate(data: Data, response: URLResponse, raw: String? = nil,
+                                 provider: LLMProvider) throws {
         guard let http = response as? HTTPURLResponse else {
-            throw GroqAPIError(statusCode: -1, message: "Respuesta no válida.", retryAfter: nil,
+            throw GroqAPIError(provider: provider, statusCode: -1, message: "Respuesta no válida.", retryAfter: nil,
                                rawResponse: raw ?? String(decoding: data, as: UTF8.self))
         }
         guard (200..<300).contains(http.statusCode) else {
             let message = errorMessage(from: data)
                 ?? HTTPURLResponse.localizedString(forStatusCode: http.statusCode)
             let retryAfter = http.value(forHTTPHeaderField: "retry-after").flatMap { TimeInterval($0) }
-            throw GroqAPIError(statusCode: http.statusCode, message: message, retryAfter: retryAfter,
+            throw GroqAPIError(provider: provider, statusCode: http.statusCode, message: message, retryAfter: retryAfter,
                                rawResponse: raw ?? rawResponse(data: data, response: response))
         }
     }

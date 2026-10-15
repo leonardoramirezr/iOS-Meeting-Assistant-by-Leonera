@@ -10,12 +10,14 @@ final class AppModel {
     let processor: MeetingProcessor
     let player: AudioPlayer
 
+    /// API key de Groq (transcripción y, si se elige, LLM).
     private(set) var apiKey: String
+    /// API key de Google (Gemini, API compatible con OpenAI).
+    private(set) var googleAPIKey: String
     private(set) var activeMeetingID: UUID? = nil
     /// Última reunión grabada, para abrirla al cerrar la pantalla de grabación.
     private(set) var lastRecordedMeetingID: UUID? = nil
     var alertMessage: String? = nil
-    private static let apiKeyAccount = "groq-api-key"
 
     init() {
         AppSettings.registerDefaults()
@@ -24,8 +26,10 @@ final class AppModel {
         self.recorder = AudioChunkRecorder()
         self.processor = MeetingProcessor(store: store)
         self.player = AudioPlayer()
-        self.apiKey = Keychain.read(Self.apiKeyAccount) ?? ""
-        processor.updateAPIKey(apiKey)
+        self.apiKey = Keychain.read(LLMProvider.groq.keychainAccount) ?? ""
+        self.googleAPIKey = Keychain.read(LLMProvider.google.keychainAccount) ?? ""
+        processor.updateAPIKey(apiKey, for: .groq)
+        processor.updateAPIKey(googleAPIKey, for: .google)
     }
 
     var hasAPIKey: Bool { !apiKey.isEmpty }
@@ -36,16 +40,26 @@ final class AppModel {
         activeMeetingID.flatMap { store.meeting($0) }
     }
 
-    func saveAPIKey(_ key: String) {
-        let trimmed = key.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard trimmed != apiKey else { return }
-        apiKey = trimmed
-        if trimmed.isEmpty {
-            Keychain.delete(Self.apiKeyAccount)
-        } else {
-            Keychain.save(trimmed, for: Self.apiKeyAccount)
+    func apiKey(for provider: LLMProvider) -> String {
+        switch provider {
+        case .groq: return apiKey
+        case .google: return googleAPIKey
         }
-        processor.updateAPIKey(trimmed)
+    }
+
+    func saveAPIKey(_ key: String, for provider: LLMProvider = .groq) {
+        let trimmed = key.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed != apiKey(for: provider) else { return }
+        switch provider {
+        case .groq: apiKey = trimmed
+        case .google: googleAPIKey = trimmed
+        }
+        if trimmed.isEmpty {
+            Keychain.delete(provider.keychainAccount)
+        } else {
+            Keychain.save(trimmed, for: provider.keychainAccount)
+        }
+        processor.updateAPIKey(trimmed, for: provider)
     }
 
     // MARK: Grabación

@@ -6,6 +6,9 @@ struct SettingsView: View {
 
     @AppStorage(AppSettings.Key.transcriptionModel) private var transcriptionModel = AppSettings.defaultTranscriptionModel
     @AppStorage(AppSettings.Key.llmModel) private var llmModel = AppSettings.defaultLLMModel
+    @AppStorage(AppSettings.Key.googleLLMModel) private var googleLLMModel = AppSettings.defaultGoogleLLMModel
+    @AppStorage(AppSettings.Key.llmProvider) private var llmProvider = AppSettings.defaultLLMProvider
+    @AppStorage(AppSettings.Key.fetchedGoogleModels) private var fetchedGoogleModels = ""
     @AppStorage(AppSettings.Key.chunkLength) private var chunkLength = AppSettings.defaultChunkLength
     @AppStorage(AppSettings.Key.language) private var language = AppSettings.defaultLanguage
     @AppStorage(AppSettings.Key.autoGenerateMinutes) private var autoGenerateMinutes = true
@@ -17,21 +20,12 @@ struct SettingsView: View {
     @AppStorage(AppSettings.Key.preventiveRateLimitPause) private var preventivePause = true
     @AppStorage(AppSettings.Key.rateLimitTokenThreshold) private var tokenThreshold = AppSettings.defaultRateLimitTokenThreshold
 
-    @State private var apiKeyDraft = ""
-    @State private var revealKey = false
-    @State private var fetchStatus: FetchStatus = .idle
-
-    enum FetchStatus: Equatable {
-        case idle
-        case loading
-        case success(String)
-        case failure(String)
-    }
 
     var body: some View {
         NavigationStack {
             Form {
-                groqSection
+                APIKeySection(provider: .groq, load: { try await loadModels(for: .groq) })
+                APIKeySection(provider: .google, load: { try await loadModels(for: .google) })
                 modelsSection
                 recordingSection
                 processingSection
@@ -44,16 +38,12 @@ struct SettingsView: View {
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Listo") {
-                        saveKey()
                         dismiss()
                     }
                 }
             }
-            .onAppear {
-                apiKeyDraft = model.apiKey
-            }
-            .onDisappear {
-                saveKey()
+            .onChange(of: llmProvider) { _, _ in
+                model.processor.kick()
             }
             .onChange(of: processingMode) { _, _ in
                 model.processor.kick()
@@ -66,59 +56,6 @@ struct SettingsView: View {
 
     // MARK: Secciones
 
-    private var groqSection: some View {
-        Section {
-            HStack {
-                Group {
-                    if revealKey {
-                        TextField("gsk_…", text: $apiKeyDraft)
-                    } else {
-                        SecureField("gsk_…", text: $apiKeyDraft)
-                    }
-                }
-                .textInputAutocapitalization(.never)
-                .autocorrectionDisabled()
-                .font(.system(.body, design: .monospaced))
-                .onSubmit(saveKey)
-                Button {
-                    revealKey.toggle()
-                } label: {
-                    Image(systemName: revealKey ? "eye.slash" : "eye")
-                }
-                .buttonStyle(.borderless)
-                .accessibilityLabel(revealKey ? "Ocultar API key" : "Mostrar API key")
-            }
-            Button {
-                Task { await testAndLoadModels() }
-            } label: {
-                HStack {
-                    Text("Guardar, probar y cargar modelos")
-                    Spacer()
-                    if fetchStatus == .loading {
-                        ProgressView()
-                    }
-                }
-            }
-            .disabled(apiKeyDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || fetchStatus == .loading)
-            switch fetchStatus {
-            case .success(let message):
-                Label(message, systemImage: "checkmark.circle.fill")
-                    .font(.footnote)
-                    .foregroundStyle(.green)
-            case .failure(let message):
-                Label(message, systemImage: "xmark.octagon.fill")
-                    .font(.footnote)
-                    .foregroundStyle(.red)
-            case .idle, .loading:
-                EmptyView()
-            }
-        } header: {
-            Text("Groq")
-        } footer: {
-            Text("La API key se guarda en el llavero del iPhone. Puedes crear una en console.groq.com/keys.")
-        }
-    }
-
     private var modelsSection: some View {
         Section {
             ModelPickerRow(
@@ -126,15 +63,29 @@ struct SettingsView: View {
                 selection: $transcriptionModel,
                 options: merged(AppSettings.suggestedTranscriptionModels, fetchedTranscriptionModels)
             )
-            ModelPickerRow(
-                title: "LLM para la minuta",
-                selection: $llmModel,
-                options: merged(AppSettings.suggestedLLMModels, fetchedLLMModels)
-            )
+            Picker("Proveedor del LLM", selection: $llmProvider) {
+                ForEach(LLMProvider.allCases) { provider in
+                    Text(provider.label).tag(provider.rawValue)
+                }
+            }
+            .pickerStyle(.segmented)
+            if llmProvider == LLMProvider.google.rawValue {
+                ModelPickerRow(
+                    title: "LLM para la minuta",
+                    selection: $googleLLMModel,
+                    options: merged(AppSettings.suggestedGoogleModels, fetchedGoogleModels)
+                )
+            } else {
+                ModelPickerRow(
+                    title: "LLM para la minuta",
+                    selection: $llmModel,
+                    options: merged(AppSettings.suggestedLLMModels, fetchedLLMModels)
+                )
+            }
         } header: {
             Text("Modelos")
         } footer: {
-            Text("Usa «Guardar, probar y cargar modelos» para traer la lista actual de Groq, o elige «Otro…» para escribir el ID exacto de un modelo.")
+            Text("La transcripción (audio a texto) siempre usa Groq: la API compatible con OpenAI de Google no ofrece transcripción. Para el LLM (resúmenes y minuta) elige primero Groq o Google y después el modelo. Usa «Guardar, probar y cargar modelos» en la sección de cada proveedor para traer su lista actual, o elige «Otro…» para escribir el ID exacto.")
         }
     }
 
@@ -240,16 +191,12 @@ struct SettingsView: View {
 
     // MARK: Acciones
 
-    private func saveKey() {
-        model.saveAPIKey(apiKeyDraft)
-    }
-
-    private func testAndLoadModels() async {
-        saveKey()
-        fetchStatus = .loading
-        do {
-            let models = try await GroqClient(apiKey: model.apiKey).listModels()
-            let ids = models.filter { $0.active ?? true }.map(\.id).sorted()
+    /// Guarda la key ya hecha por `APIKeySection`, pide la lista de modelos y la guarda.
+    private func loadModels(for provider: LLMProvider) async throws -> String {
+        let models = try await GroqClient(apiKey: model.apiKey(for: provider), provider: provider).listModels()
+        let ids = models.filter { $0.active ?? true }.map(\.id).sorted()
+        switch provider {
+        case .groq:
             let transcription = ids.filter { $0.localizedCaseInsensitiveContains("whisper") }
             let excluded = ["whisper", "tts", "guard", "orpheus", "playai"]
             let chat = ids.filter { id in
@@ -257,9 +204,14 @@ struct SettingsView: View {
             }
             fetchedTranscriptionModels = transcription.joined(separator: "\n")
             fetchedLLMModels = chat.joined(separator: "\n")
-            fetchStatus = .success("API key válida · \(transcription.count) modelos de audio y \(chat.count) de texto")
-        } catch {
-            fetchStatus = .failure(error.localizedDescription)
+            return "API key válida · \(transcription.count) modelos de audio y \(chat.count) de texto"
+        case .google:
+            let excluded = ["embedding", "imagen", "veo", "aqa", "tts", "image-generation", "native-audio", "live"]
+            let chat = ids.filter { id in
+                !excluded.contains { id.localizedCaseInsensitiveContains($0) }
+            }
+            fetchedGoogleModels = chat.joined(separator: "\n")
+            return "API key válida · \(chat.count) modelos de texto"
         }
     }
 
@@ -362,6 +314,95 @@ struct PromptEditorView: View {
             Button("Restaurar", role: .destructive) {
                 prompt = AppSettings.defaultMinutesPrompt
             }
+        }
+    }
+}
+
+/// Sección con la API key de un proveedor (cada una se guarda por separado en el llavero).
+struct APIKeySection: View {
+    @Environment(AppModel.self) private var model
+    let provider: LLMProvider
+    let load: () async throws -> String
+
+    @State private var draft = ""
+    @State private var reveal = false
+    @State private var status: Status = .idle
+
+    enum Status: Equatable {
+        case idle
+        case loading
+        case success(String)
+        case failure(String)
+    }
+
+    var body: some View {
+        Section {
+            HStack {
+                Group {
+                    if reveal {
+                        TextField(provider.keyPlaceholder, text: $draft)
+                    } else {
+                        SecureField(provider.keyPlaceholder, text: $draft)
+                    }
+                }
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+                .font(.system(.body, design: .monospaced))
+                .onSubmit(save)
+                Button {
+                    reveal.toggle()
+                } label: {
+                    Image(systemName: reveal ? "eye.slash" : "eye")
+                }
+                .buttonStyle(.borderless)
+                .accessibilityLabel(reveal ? "Ocultar API key" : "Mostrar API key")
+            }
+            Button {
+                Task { await testAndLoad() }
+            } label: {
+                HStack {
+                    Text("Guardar, probar y cargar modelos")
+                    Spacer()
+                    if status == .loading {
+                        ProgressView()
+                    }
+                }
+            }
+            .disabled(draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || status == .loading)
+            switch status {
+            case .success(let message):
+                Label(message, systemImage: "checkmark.circle.fill")
+                    .font(.footnote)
+                    .foregroundStyle(.green)
+            case .failure(let message):
+                Label(message, systemImage: "xmark.octagon.fill")
+                    .font(.footnote)
+                    .foregroundStyle(.red)
+            case .idle, .loading:
+                EmptyView()
+            }
+        } header: {
+            Text(provider.label)
+        } footer: {
+            Text("La API key se guarda en el llavero del iPhone. Puedes crear una en \(provider.consoleHint).")
+        }
+        .onAppear {
+            draft = model.apiKey(for: provider)
+        }
+        .onDisappear(perform: save)
+    }
+
+    private func save() {
+        model.saveAPIKey(draft, for: provider)
+    }
+
+    private func testAndLoad() async {
+        save()
+        status = .loading
+        do {
+            status = .success(try await load())
+        } catch {
+            status = .failure(error.localizedDescription)
         }
     }
 }
