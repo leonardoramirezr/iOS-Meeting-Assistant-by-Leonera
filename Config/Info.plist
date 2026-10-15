@@ -26,6 +26,13 @@
 	<true/>
 	<key>LSSupportsOpeningDocumentsInPlace</key>
 	<true/>
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSAllowsLocalNetworking</key>
+		<true/>
+	</dict>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>Para conectarse a un proveedor de IA compatible con OpenAI que se ejecuta en tu red local.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>El micrófono se usa para grabar la reunión, transcribirla y generar la minuta.</string>
 	<key>UIBackgroundModes</key>

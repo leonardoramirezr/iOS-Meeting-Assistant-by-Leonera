@@ -4,28 +4,28 @@ struct SettingsView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
 
-    @AppStorage(AppSettings.Key.transcriptionModel) private var transcriptionModel = AppSettings.defaultTranscriptionModel
-    @AppStorage(AppSettings.Key.llmModel) private var llmModel = AppSettings.defaultLLMModel
-    @AppStorage(AppSettings.Key.googleLLMModel) private var googleLLMModel = AppSettings.defaultGoogleLLMModel
-    @AppStorage(AppSettings.Key.llmProvider) private var llmProvider = AppSettings.defaultLLMProvider
-    @AppStorage(AppSettings.Key.fetchedGoogleModels) private var fetchedGoogleModels = ""
+    @AppStorage(AppSettings.Key.llmProvider) private var llmProviderID = AppSettings.defaultLLMProvider
+    @AppStorage(AppSettings.Key.transcriptionProvider) private var transcriptionProviderID = LLMProvider.groq.id
     @AppStorage(AppSettings.Key.chunkLength) private var chunkLength = AppSettings.defaultChunkLength
     @AppStorage(AppSettings.Key.language) private var language = AppSettings.defaultLanguage
     @AppStorage(AppSettings.Key.autoGenerateMinutes) private var autoGenerateMinutes = true
-    @AppStorage(AppSettings.Key.fetchedTranscriptionModels) private var fetchedTranscriptionModels = ""
-    @AppStorage(AppSettings.Key.fetchedLLMModels) private var fetchedLLMModels = ""
     @AppStorage(AppSettings.Key.processingMode) private var processingMode = AppSettings.defaultProcessingMode
     @AppStorage(AppSettings.Key.mapReduceGroupSize) private var groupSize = AppSettings.defaultMapReduceGroupSize
     @AppStorage(AppSettings.Key.quotaPause) private var quotaPause = AppSettings.defaultQuotaPause
     @AppStorage(AppSettings.Key.preventiveRateLimitPause) private var preventivePause = true
     @AppStorage(AppSettings.Key.rateLimitTokenThreshold) private var tokenThreshold = AppSettings.defaultRateLimitTokenThreshold
 
+    /// Las claves de modelo dependen del proveedor (no caben en un `@AppStorage` fijo):
+    /// se leen de `UserDefaults` y este contador fuerza el redibujado al cambiarlas.
+    @State private var revision = 0
 
     var body: some View {
         NavigationStack {
             Form {
-                APIKeySection(provider: .groq, load: { try await loadModels(for: .groq) })
-                APIKeySection(provider: .google, load: { try await loadModels(for: .google) })
+                ForEach(LLMProvider.builtIn) { provider in
+                    APIKeySection(provider: provider, load: { try await loadModels(for: provider) })
+                }
+                customProvidersSection
                 modelsSection
                 recordingSection
                 processingSection
@@ -42,7 +42,10 @@ struct SettingsView: View {
                     }
                 }
             }
-            .onChange(of: llmProvider) { _, _ in
+            .onChange(of: llmProviderID) { _, _ in
+                model.processor.kick()
+            }
+            .onChange(of: transcriptionProviderID) { _, _ in
                 model.processor.kick()
             }
             .onChange(of: processingMode) { _, _ in
@@ -56,36 +59,106 @@ struct SettingsView: View {
 
     // MARK: Secciones
 
+    private var transcriptionProviders: [LLMProvider] {
+        model.allProviders.filter(\.supportsTranscription)
+    }
+
+    private var transcriptionProvider: LLMProvider {
+        transcriptionProviders.first { $0.id == transcriptionProviderID } ?? .groq
+    }
+
+    private var llmProvider: LLMProvider {
+        model.allProviders.first { $0.id == llmProviderID } ?? .groq
+    }
+
+    private func storedString(_ key: String, default fallback: String) -> Binding<String> {
+        Binding(
+            get: {
+                _ = revision
+                return UserDefaults.standard.string(forKey: key) ?? fallback
+            },
+            set: { newValue in
+                UserDefaults.standard.set(newValue, forKey: key)
+                revision += 1
+                model.processor.kick()
+            }
+        )
+    }
+
+    private func fetchedList(_ key: String) -> String {
+        _ = revision
+        return UserDefaults.standard.string(forKey: key) ?? ""
+    }
+
     private var modelsSection: some View {
-        Section {
-            ModelPickerRow(
-                title: "Audio a texto",
-                selection: $transcriptionModel,
-                options: merged(AppSettings.suggestedTranscriptionModels, fetchedTranscriptionModels)
-            )
-            Picker("Proveedor del LLM", selection: $llmProvider) {
-                ForEach(LLMProvider.allCases) { provider in
-                    Text(provider.label).tag(provider.rawValue)
+        let transcription = transcriptionProvider
+        let llm = llmProvider
+        return Section {
+            Picker("Proveedor de audio a texto", selection: $transcriptionProviderID) {
+                ForEach(transcriptionProviders) { provider in
+                    Text(provider.label).tag(provider.id)
                 }
             }
-            .pickerStyle(.segmented)
-            if llmProvider == LLMProvider.google.rawValue {
-                ModelPickerRow(
-                    title: "LLM para la minuta",
-                    selection: $googleLLMModel,
-                    options: merged(AppSettings.suggestedGoogleModels, fetchedGoogleModels)
-                )
-            } else {
-                ModelPickerRow(
-                    title: "LLM para la minuta",
-                    selection: $llmModel,
-                    options: merged(AppSettings.suggestedLLMModels, fetchedLLMModels)
-                )
+            ModelPickerRow(
+                title: "Modelo de audio a texto",
+                selection: storedString(AppSettings.Key.transcriptionModel(for: transcription),
+                                        default: AppSettings.transcriptionModel(for: transcription)),
+                options: merged(transcription.id == LLMProvider.groq.id ? AppSettings.suggestedTranscriptionModels : [],
+                                fetchedList(AppSettings.Key.fetchedTranscriptionModels(for: transcription)))
+            )
+            .id("transcription-\(transcription.id)")
+            Picker("Proveedor del LLM", selection: $llmProviderID) {
+                ForEach(model.allProviders) { provider in
+                    Text(provider.label).tag(provider.id)
+                }
             }
+            ModelPickerRow(
+                title: "Modelo del LLM (minuta)",
+                selection: storedString(AppSettings.Key.llmModel(for: llm),
+                                        default: AppSettings.llmModel(for: llm)),
+                options: merged(suggestedLLMModels(for: llm),
+                                fetchedList(AppSettings.Key.fetchedLLMModels(for: llm)))
+            )
+            .id("llm-\(llm.id)")
         } header: {
             Text("Modelos")
         } footer: {
-            Text("La transcripción (audio a texto) siempre usa Groq: la API compatible con OpenAI de Google no ofrece transcripción. Para el LLM (resúmenes y minuta) elige primero Groq o Google y después el modelo. Usa «Guardar, probar y cargar modelos» en la sección de cada proveedor para traer su lista actual, o elige «Otro…» para escribir el ID exacto.")
+            Text("Elige primero el proveedor y después el modelo. La transcripción solo puede usar proveedores con /audio/transcriptions (Groq, o uno personalizado marcado así): la API compatible con OpenAI de Google no la ofrece. Usa «Guardar, probar y cargar modelos» de cada proveedor para traer su lista actual, o elige «Otro…» para escribir el ID exacto.")
+        }
+    }
+
+    private func suggestedLLMModels(for provider: LLMProvider) -> [String] {
+        switch provider.id {
+        case LLMProvider.groq.id: return AppSettings.suggestedLLMModels
+        case LLMProvider.google.id: return AppSettings.suggestedGoogleModels
+        default: return []
+        }
+    }
+
+    private var customProvidersSection: some View {
+        Section {
+            ForEach(model.customProviders) { provider in
+                NavigationLink {
+                    CustomProviderEditor(provider: provider, load: { try await loadModels(for: $0) })
+                } label: {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(provider.name)
+                        Text(provider.baseURLString)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+                }
+            }
+            NavigationLink {
+                CustomProviderEditor(provider: nil, load: { try await loadModels(for: $0) })
+            } label: {
+                Label("Añadir proveedor compatible con OpenAI", systemImage: "plus.circle")
+            }
+        } header: {
+            Text("Otros proveedores")
+        } footer: {
+            Text("Cualquier API compatible con OpenAI (OpenAI, OpenRouter, Mistral, Together, un servidor local…), con su nombre, URL base y API key.")
         }
     }
 
@@ -191,28 +264,42 @@ struct SettingsView: View {
 
     // MARK: Acciones
 
-    /// Guarda la key ya hecha por `APIKeySection`, pide la lista de modelos y la guarda.
+    /// Pide la lista de modelos del proveedor (con la key ya guardada) y la guarda.
     private func loadModels(for provider: LLMProvider) async throws -> String {
         let models = try await GroqClient(apiKey: model.apiKey(for: provider), provider: provider).listModels()
         let ids = models.filter { $0.active ?? true }.map(\.id).sorted()
-        switch provider {
-        case .groq:
-            let transcription = ids.filter { $0.localizedCaseInsensitiveContains("whisper") }
+        let defaults = UserDefaults.standard
+        let audioHints = ["whisper", "transcri", "speech-to-text", "stt"]
+        let isAudio: (String) -> Bool = { id in audioHints.contains { id.localizedCaseInsensitiveContains($0) } }
+        let message: String
+        switch provider.id {
+        case LLMProvider.groq.id:
+            let transcription = ids.filter(isAudio)
             let excluded = ["whisper", "tts", "guard", "orpheus", "playai"]
-            let chat = ids.filter { id in
-                !excluded.contains { id.localizedCaseInsensitiveContains($0) }
-            }
-            fetchedTranscriptionModels = transcription.joined(separator: "\n")
-            fetchedLLMModels = chat.joined(separator: "\n")
-            return "API key válida · \(transcription.count) modelos de audio y \(chat.count) de texto"
-        case .google:
+            let chat = ids.filter { id in !excluded.contains { id.localizedCaseInsensitiveContains($0) } }
+            defaults.set(transcription.joined(separator: "\n"), forKey: AppSettings.Key.fetchedTranscriptionModels(for: provider))
+            defaults.set(chat.joined(separator: "\n"), forKey: AppSettings.Key.fetchedLLMModels(for: provider))
+            message = "API key válida · \(transcription.count) modelos de audio y \(chat.count) de texto"
+        case LLMProvider.google.id:
             let excluded = ["embedding", "imagen", "veo", "aqa", "tts", "image-generation", "native-audio", "live"]
-            let chat = ids.filter { id in
-                !excluded.contains { id.localizedCaseInsensitiveContains($0) }
+            let chat = ids.filter { id in !excluded.contains { id.localizedCaseInsensitiveContains($0) } }
+            defaults.set(chat.joined(separator: "\n"), forKey: AppSettings.Key.fetchedLLMModels(for: provider))
+            message = "API key válida · \(chat.count) modelos de texto"
+        default:
+            // Proveedor personalizado: se muestran todos los modelos; los de audio también
+            // para la transcripción (o todos si ninguno lo parece).
+            let excluded = ["embed", "tts", "moderation", "dall-e", "image"]
+            let chat = ids.filter { id in !excluded.contains { id.localizedCaseInsensitiveContains($0) } && !isAudio(id) }
+            defaults.set((chat.isEmpty ? ids : chat).joined(separator: "\n"), forKey: AppSettings.Key.fetchedLLMModels(for: provider))
+            if provider.supportsTranscription {
+                let audio = ids.filter(isAudio)
+                defaults.set((audio.isEmpty ? ids : audio).joined(separator: "\n"),
+                             forKey: AppSettings.Key.fetchedTranscriptionModels(for: provider))
             }
-            fetchedGoogleModels = chat.joined(separator: "\n")
-            return "API key válida · \(chat.count) modelos de texto"
+            message = "Conexión correcta · \(ids.count) modelos"
         }
+        revision += 1
+        return message
     }
 
     private func merged(_ suggested: [String], _ fetched: String) -> [String] {
@@ -384,7 +471,11 @@ struct APIKeySection: View {
         } header: {
             Text(provider.label)
         } footer: {
-            Text("La API key se guarda en el llavero del iPhone. Puedes crear una en \(provider.consoleHint).")
+            if let hint = provider.consoleHint {
+                Text("La API key se guarda en el llavero del iPhone. Puedes crear una en \(hint).")
+            } else {
+                Text("La API key se guarda en el llavero del iPhone.")
+            }
         }
         .onAppear {
             draft = model.apiKey(for: provider)
@@ -401,6 +492,165 @@ struct APIKeySection: View {
         status = .loading
         do {
             status = .success(try await load())
+        } catch {
+            status = .failure(error.localizedDescription)
+        }
+    }
+}
+
+/// Alta y edición de un proveedor compatible con OpenAI.
+struct CustomProviderEditor: View {
+    @Environment(AppModel.self) private var model
+    @Environment(\.dismiss) private var dismiss
+    let provider: LLMProvider?
+    let load: (LLMProvider) async throws -> String
+
+    @State private var name = ""
+    @State private var baseURL = ""
+    @State private var apiKey = ""
+    @State private var supportsTranscription = false
+    @State private var revealKey = false
+    @State private var status: APIKeySection.Status = .idle
+    @State private var savedID: String? = nil
+    @State private var confirmDelete = false
+
+    private var trimmedName: String { name.trimmingCharacters(in: .whitespacesAndNewlines) }
+
+    private var draft: LLMProvider {
+        let id = savedID ?? provider?.id ?? "custom-\(UUID().uuidString)"
+        return LLMProvider(id: id, name: trimmedName,
+                           baseURLString: baseURL.trimmingCharacters(in: .whitespacesAndNewlines),
+                           supportsTranscription: supportsTranscription)
+    }
+
+    private var isValid: Bool { !trimmedName.isEmpty && draft.baseURL != nil }
+
+    var body: some View {
+        Form {
+            Section {
+                TextField("Nombre del proveedor", text: $name)
+                TextField("https://api.ejemplo.com/v1", text: $baseURL)
+                    .keyboardType(.URL)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+            } header: {
+                Text("Proveedor")
+            } footer: {
+                if !baseURL.isEmpty, draft.baseURL == nil {
+                    Text("La URL no es válida: debe empezar con https:// (o http:// en la red local).")
+                        .foregroundStyle(.red)
+                } else {
+                    Text("URL base de la API, la que normalmente acaba en /v1 (sin /chat/completions). Se usan <URL>/chat/completions, <URL>/models y, si lo activas, <URL>/audio/transcriptions.")
+                }
+            }
+
+            Section {
+                HStack {
+                    Group {
+                        if revealKey {
+                            TextField("API key (opcional)", text: $apiKey)
+                        } else {
+                            SecureField("API key (opcional)", text: $apiKey)
+                        }
+                    }
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                    .font(.system(.body, design: .monospaced))
+                    Button {
+                        revealKey.toggle()
+                    } label: {
+                        Image(systemName: revealKey ? "eye.slash" : "eye")
+                    }
+                    .buttonStyle(.borderless)
+                }
+            } header: {
+                Text("API key")
+            } footer: {
+                Text("Se envía como «Authorization: Bearer …» y se guarda en el llavero. Déjala vacía si el servidor no la pide.")
+            }
+
+            Section {
+                Toggle("Admite transcripción de audio", isOn: $supportsTranscription)
+            } footer: {
+                Text("Actívalo si el proveedor ofrece /audio/transcriptions (p. ej. OpenAI con whisper-1) para poder elegirlo como proveedor de audio a texto.")
+            }
+
+            Section {
+                Button {
+                    Task { await saveAndTest() }
+                } label: {
+                    HStack {
+                        Text("Guardar, probar y cargar modelos")
+                        Spacer()
+                        if status == .loading {
+                            ProgressView()
+                        }
+                    }
+                }
+                .disabled(!isValid || status == .loading)
+                switch status {
+                case .success(let message):
+                    Label(message, systemImage: "checkmark.circle.fill")
+                        .font(.footnote)
+                        .foregroundStyle(.green)
+                case .failure(let message):
+                    Label(message, systemImage: "xmark.octagon.fill")
+                        .font(.footnote)
+                        .foregroundStyle(.red)
+                case .idle, .loading:
+                    EmptyView()
+                }
+            }
+
+            if provider != nil || savedID != nil {
+                Section {
+                    Button("Eliminar proveedor", role: .destructive) {
+                        confirmDelete = true
+                    }
+                }
+            }
+        }
+        .navigationTitle(provider == nil ? "Nuevo proveedor" : (provider?.name ?? "Proveedor"))
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .confirmationAction) {
+                Button("Guardar") {
+                    save()
+                    dismiss()
+                }
+                .disabled(!isValid)
+            }
+        }
+        .confirmationDialog("¿Eliminar este proveedor?", isPresented: $confirmDelete, titleVisibility: .visible) {
+            Button("Eliminar", role: .destructive) {
+                model.deleteCustomProvider(draft)
+                dismiss()
+            }
+        } message: {
+            Text("Se borran su API key y su lista de modelos. Si estaba seleccionado, se vuelve a usar Groq.")
+        }
+        .onAppear {
+            guard let provider, name.isEmpty, baseURL.isEmpty else { return }
+            name = provider.name
+            baseURL = provider.baseURLString
+            supportsTranscription = provider.supportsTranscription
+            apiKey = model.apiKey(for: provider)
+        }
+    }
+
+    private func save() {
+        guard isValid else { return }
+        let saved = draft
+        savedID = saved.id
+        model.saveCustomProvider(saved)
+        model.saveAPIKey(apiKey, for: saved)
+    }
+
+    private func saveAndTest() async {
+        save()
+        status = .loading
+        do {
+            status = .success(try await load(draft))
         } catch {
             status = .failure(error.localizedDescription)
         }

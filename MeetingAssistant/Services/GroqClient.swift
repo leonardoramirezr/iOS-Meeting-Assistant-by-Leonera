@@ -103,10 +103,8 @@ struct RateLimitInfo {
     }
 }
 
-/// Cliente mínimo de una API compatible con OpenAI (Groq o Google).
-/// La transcripción (`audio/transcriptions`) solo existe en Groq.
+/// Cliente mínimo de una API compatible con OpenAI (Groq, Google o un proveedor personalizado).
 struct GroqClient {
-    static let transcriptionsURL = URL(string: "https://api.groq.com/openai/v1/audio/transcriptions")!
 
     private static let session: URLSession = {
         let configuration = URLSessionConfiguration.default
@@ -118,21 +116,38 @@ struct GroqClient {
     let apiKey: String
     var provider: LLMProvider = .groq
 
+    private func url(_ url: URL?) throws -> URL {
+        guard let url else {
+            throw GroqAPIError(provider: provider, statusCode: -1,
+                               message: "La URL base «\(provider.baseURLString)» no es válida.",
+                               retryAfter: nil, rawResponse: "")
+        }
+        return url
+    }
+
+    /// Solo se envía `Authorization` si hay key (un servidor local puede no pedirla).
+    private func authorize(_ request: inout URLRequest) {
+        if !apiKey.isEmpty {
+            request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+        }
+    }
+
     // MARK: Modelos
 
     /// Modelos disponibles (`GET <base>/models`). En Google, si esa ruta no existe se
     /// prueba `<base>/v1/models`; el prefijo `models/` de los IDs se quita.
     func listModels() async throws -> [GroqModel] {
         do {
-            return try await listModels(at: provider.modelsURL)
-        } catch let error as GroqAPIError where provider == .google && error.statusCode == 404 {
-            return try await listModels(at: URL(string: "v1/models", relativeTo: provider.baseURL)!.absoluteURL)
+            return try await listModels(at: try url(provider.modelsURL))
+        } catch let error as GroqAPIError where provider.id == LLMProvider.google.id && error.statusCode == 404 {
+            let fallback = provider.baseURL.flatMap { URL(string: "v1/models", relativeTo: $0)?.absoluteURL }
+            return try await listModels(at: try url(fallback))
         }
     }
 
     private func listModels(at url: URL) async throws -> [GroqModel] {
         var request = URLRequest(url: url)
-        request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+        authorize(&request)
         let (data, response) = try await Self.session.data(for: request)
         try Self.validate(data: data, response: response, provider: provider)
         struct ModelList: Decodable { let data: [GroqModel] }
@@ -167,13 +182,13 @@ struct GroqClient {
         body.append(audio)
         body.append(Data("\r\n--\(boundary)--\r\n".utf8))
 
-        var request = URLRequest(url: Self.transcriptionsURL)
+        var request = URLRequest(url: try url(provider.transcriptionsURL))
         request.httpMethod = "POST"
-        request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+        authorize(&request)
         request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
 
         let (data, response) = try await Self.session.upload(for: request, from: body)
-        try Self.validate(data: data, response: response, provider: .groq)
+        try Self.validate(data: data, response: response, provider: provider)
         struct Transcription: Decodable { let text: String }
         let text = try JSONDecoder().decode(Transcription.self, from: data).text
         return TranscriptionResult(text: text, rateLimit: RateLimitInfo(response: response))
@@ -198,21 +213,26 @@ struct GroqClient {
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
         let body = try encoder.encode(ChatBody(model: model, messages: messages, temperature: temperature))
 
-        var request = URLRequest(url: provider.chatURL)
+        let chatURL = try url(provider.chatURL)
+        var request = URLRequest(url: chatURL)
         request.httpMethod = "POST"
-        request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+        authorize(&request)
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = body
 
-        let raw = [
-            "POST \(provider.chatURL.path) HTTP/1.1",
-            "Host: \(provider.host)",
-            "Authorization: Bearer \(Self.redacted(apiKey))",
+        var lines = [
+            "POST \(chatURL.path) HTTP/1.1",
+            "Host: \(chatURL.host ?? provider.host)",
+        ]
+        if !apiKey.isEmpty {
+            lines.append("Authorization: Bearer \(Self.redacted(apiKey))")
+        }
+        let raw = (lines + [
             "Content-Type: application/json",
             "Content-Length: \(body.count)",
             "",
             String(decoding: body, as: UTF8.self),
-        ].joined(separator: "\n")
+        ]).joined(separator: "\n")
 
         return PreparedChatRequest(urlRequest: request, rawText: raw)
     }

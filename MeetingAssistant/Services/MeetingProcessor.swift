@@ -8,12 +8,13 @@ final class MeetingProcessor {
     private(set) var isProcessingQueue = false
     private(set) var isSummarizing = false
     /// Último rechazo de la API key de cada proveedor; su cola se detiene hasta que la key cambie.
-    private(set) var authErrors: [LLMProvider: String] = [:]
+    /// Indexado por `LLMProvider.id`.
+    private(set) var authErrors: [String: String] = [:]
     /// Fin de la pausa por límite de cuota (429). Se guarda para reanudar tras reiniciar la app.
     private(set) var pausedUntil: Date? = nil
     /// Motivo de la pausa en curso (cuota agotada o pausa preventiva).
     private(set) var pauseReason: String? = nil
-    @ObservationIgnored private var apiKeys: [LLMProvider: String] = [:]
+    @ObservationIgnored private var apiKeys: [String: String] = [:]
     @ObservationIgnored private var resumeTask: Task<Void, Never>? = nil
     @ObservationIgnored private var generatingMinutes: Set<UUID> = []
 
@@ -33,23 +34,24 @@ final class MeetingProcessor {
     }
 
     func updateAPIKey(_ key: String, for provider: LLMProvider) {
-        if key != apiKeys[provider, default: ""] {
-            apiKeys[provider] = key
-            authErrors[provider] = nil
+        if key != apiKeys[provider.id, default: ""] {
+            apiKeys[provider.id] = key
+            authErrors[provider.id] = nil
         }
         kick()
     }
 
     private func key(for provider: LLMProvider) -> String {
-        apiKeys[provider, default: ""]
+        apiKeys[provider.id, default: ""]
     }
 
+    /// Los proveedores personalizados pueden funcionar sin key (p. ej. un servidor local).
     private func hasUsableKey(_ provider: LLMProvider) -> Bool {
-        !key(for: provider).isEmpty && authErrors[provider] == nil
+        (!key(for: provider).isEmpty || !provider.requiresAPIKey) && authErrors[provider.id] == nil
     }
 
-    /// La transcripción (Whisper) siempre va a Groq.
-    private var canTranscribe: Bool { hasUsableKey(.groq) }
+    /// Transcripción con el proveedor de audio a texto seleccionado (Groq por defecto).
+    private var canTranscribe: Bool { hasUsableKey(AppSettings.transcriptionProvider) }
 
     /// Resúmenes y minuta usan el proveedor de LLM seleccionado.
     private var canUseLLM: Bool { hasUsableKey(AppSettings.llmProvider) }
@@ -60,7 +62,7 @@ final class MeetingProcessor {
     }
 
     private func markAuthError(_ error: GroqAPIError) {
-        authErrors[error.provider] = error.localizedDescription
+        authErrors[error.provider.id] = error.localizedDescription
     }
 
     var isPaused: Bool {
@@ -186,8 +188,9 @@ final class MeetingProcessor {
     }
 
     private func transcribe(_ job: ChunkJob) async {
-        let groqKey = key(for: .groq)
-        let model = AppSettings.transcriptionModel
+        let transcriptionProvider = AppSettings.transcriptionProvider
+        let transcriptionKey = key(for: transcriptionProvider)
+        let model = AppSettings.transcriptionModel(for: transcriptionProvider)
         let language = AppSettings.transcriptionLanguage
         store.updateChunk(job.meetingID, index: job.index) { chunk in
             chunk.status = .transcribing
@@ -203,7 +206,7 @@ final class MeetingProcessor {
             return
         }
 
-        let client = GroqClient(apiKey: groqKey)
+        let client = GroqClient(apiKey: transcriptionKey, provider: transcriptionProvider)
         var attempt = 0
         while true {
             attempt += 1
@@ -490,7 +493,7 @@ final class MeetingProcessor {
         guard let meeting = store.meeting(meetingID),
               meeting.minutesStatus != .generating, !generatingMinutes.contains(meetingID) else { return }
         let provider = AppSettings.llmProvider
-        guard !key(for: provider).isEmpty else {
+        guard !key(for: provider).isEmpty || !provider.requiresAPIKey else {
             store.update(meetingID) { meeting in
                 meeting.minutesStatus = .failed
                 meeting.minutesError = "Configura tu API key de \(provider.label) en Ajustes."

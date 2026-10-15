@@ -10,10 +10,10 @@ final class AppModel {
     let processor: MeetingProcessor
     let player: AudioPlayer
 
-    /// API key de Groq (transcripción y, si se elige, LLM).
-    private(set) var apiKey: String
-    /// API key de Google (Gemini, API compatible con OpenAI).
-    private(set) var googleAPIKey: String
+    /// API keys guardadas en el llavero, por `LLMProvider.id`.
+    private(set) var apiKeys: [String: String] = [:]
+    /// Proveedores compatibles con OpenAI añadidos por el usuario.
+    private(set) var customProviders: [LLMProvider] = []
     private(set) var activeMeetingID: UUID? = nil
     /// Última reunión grabada, para abrirla al cerrar la pantalla de grabación.
     private(set) var lastRecordedMeetingID: UUID? = nil
@@ -26,13 +26,20 @@ final class AppModel {
         self.recorder = AudioChunkRecorder()
         self.processor = MeetingProcessor(store: store)
         self.player = AudioPlayer()
-        self.apiKey = Keychain.read(LLMProvider.groq.keychainAccount) ?? ""
-        self.googleAPIKey = Keychain.read(LLMProvider.google.keychainAccount) ?? ""
-        processor.updateAPIKey(apiKey, for: .groq)
-        processor.updateAPIKey(googleAPIKey, for: .google)
+        customProviders = AppSettings.customProviders
+        for provider in AppSettings.allProviders {
+            let key = Keychain.read(provider.keychainAccount) ?? ""
+            apiKeys[provider.id] = key
+            processor.updateAPIKey(key, for: provider)
+        }
     }
 
-    var hasAPIKey: Bool { !apiKey.isEmpty }
+    /// Hay key para el proveedor de transcripción (o no la necesita).
+    var hasAPIKey: Bool { hasKey(for: AppSettings.transcriptionProvider) }
+
+    func hasKey(for provider: LLMProvider) -> Bool {
+        !provider.requiresAPIKey || !apiKey(for: provider).isEmpty
+    }
 
     var isRecording: Bool { recorder.state != .idle }
 
@@ -40,26 +47,61 @@ final class AppModel {
         activeMeetingID.flatMap { store.meeting($0) }
     }
 
+    /// API key de Groq.
+    var apiKey: String { apiKey(for: .groq) }
+
+    var allProviders: [LLMProvider] { LLMProvider.builtIn + customProviders }
+
     func apiKey(for provider: LLMProvider) -> String {
-        switch provider {
-        case .groq: return apiKey
-        case .google: return googleAPIKey
-        }
+        apiKeys[provider.id, default: ""]
     }
 
     func saveAPIKey(_ key: String, for provider: LLMProvider = .groq) {
         let trimmed = key.trimmingCharacters(in: .whitespacesAndNewlines)
         guard trimmed != apiKey(for: provider) else { return }
-        switch provider {
-        case .groq: apiKey = trimmed
-        case .google: googleAPIKey = trimmed
-        }
+        apiKeys[provider.id] = trimmed
         if trimmed.isEmpty {
             Keychain.delete(provider.keychainAccount)
         } else {
             Keychain.save(trimmed, for: provider.keychainAccount)
         }
         processor.updateAPIKey(trimmed, for: provider)
+    }
+
+    // MARK: Proveedores personalizados
+
+    /// Crea o actualiza un proveedor personalizado.
+    func saveCustomProvider(_ provider: LLMProvider) {
+        guard !provider.isBuiltIn else { return }
+        if let index = customProviders.firstIndex(where: { $0.id == provider.id }) {
+            customProviders[index] = provider
+        } else {
+            customProviders.append(provider)
+        }
+        AppSettings.customProviders = customProviders
+        processor.kick()
+    }
+
+    /// Elimina el proveedor, su API key y, si estaba seleccionado, vuelve a Groq.
+    func deleteCustomProvider(_ provider: LLMProvider) {
+        guard !provider.isBuiltIn else { return }
+        customProviders.removeAll { $0.id == provider.id }
+        AppSettings.customProviders = customProviders
+        Keychain.delete(provider.keychainAccount)
+        apiKeys[provider.id] = nil
+        processor.updateAPIKey("", for: provider)
+        let defaults = UserDefaults.standard
+        if defaults.string(forKey: AppSettings.Key.llmProvider) == provider.id {
+            defaults.set(LLMProvider.groq.id, forKey: AppSettings.Key.llmProvider)
+        }
+        if defaults.string(forKey: AppSettings.Key.transcriptionProvider) == provider.id {
+            defaults.set(LLMProvider.groq.id, forKey: AppSettings.Key.transcriptionProvider)
+        }
+        for key in [AppSettings.Key.llmModel(for: provider), AppSettings.Key.transcriptionModel(for: provider),
+                    AppSettings.Key.fetchedLLMModels(for: provider),
+                    AppSettings.Key.fetchedTranscriptionModels(for: provider)] {
+            defaults.removeObject(forKey: key)
+        }
     }
 
     // MARK: Grabación

@@ -44,57 +44,75 @@ enum TranscriptionLanguage: String, CaseIterable, Identifiable {
     }
 }
 
-/// Proveedor de la API compatible con OpenAI que se usa para el LLM.
-enum LLMProvider: String, CaseIterable, Identifiable, Codable {
-    case groq
-    case google
+/// Proveedor con API compatible con OpenAI: Groq y Google vienen integrados y el usuario
+/// puede añadir otros (nombre + URL base). Se identifica por `id`.
+struct LLMProvider: Codable, Hashable, Identifiable {
+    var id: String
+    var name: String
+    /// URL base de la API, p. ej. `https://api.ejemplo.com/v1`.
+    var baseURLString: String
+    /// Ofrece `POST <base>/audio/transcriptions` (Whisper u otro modelo de audio a texto).
+    var supportsTranscription: Bool
 
-    var id: String { rawValue }
+    static let groq = LLMProvider(id: "groq", name: "Groq",
+                                  baseURLString: "https://api.groq.com/openai/v1/", supportsTranscription: true)
+    static let google = LLMProvider(id: "google", name: "Google",
+                                    baseURLString: "https://generativelanguage.googleapis.com/v1beta/openai/",
+                                    supportsTranscription: false)
+    static let builtIn = [groq, google]
 
-    var label: String {
-        switch self {
-        case .groq: return "Groq"
-        case .google: return "Google"
-        }
+    static func custom(name: String, baseURL: String, supportsTranscription: Bool) -> LLMProvider {
+        LLMProvider(id: "custom-\(UUID().uuidString)", name: name, baseURLString: baseURL,
+                    supportsTranscription: supportsTranscription)
     }
 
-    var host: String {
-        switch self {
-        case .groq: return "api.groq.com"
-        case .google: return "generativelanguage.googleapis.com"
-        }
+    var isBuiltIn: Bool { id == Self.groq.id || id == Self.google.id }
+    var label: String { name }
+
+    /// URL base normalizada (siempre termina en "/" para resolver rutas relativas).
+    var baseURL: URL? {
+        var text = baseURLString.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return nil }
+        if !text.hasSuffix("/") { text += "/" }
+        guard let url = URL(string: text), let scheme = url.scheme?.lowercased(),
+              scheme == "https" || scheme == "http", url.host != nil else { return nil }
+        return url
     }
 
-    /// Base de la API compatible con OpenAI (termina en "/").
-    var baseURL: URL {
-        switch self {
-        case .groq: return URL(string: "https://api.groq.com/openai/v1/")!
-        case .google: return URL(string: "https://generativelanguage.googleapis.com/v1beta/openai/")!
-        }
+    private func endpoint(_ path: String) -> URL? {
+        baseURL.flatMap { URL(string: path, relativeTo: $0)?.absoluteURL }
     }
 
-    var chatURL: URL { URL(string: "chat/completions", relativeTo: baseURL)!.absoluteURL }
-    var modelsURL: URL { URL(string: "models", relativeTo: baseURL)!.absoluteURL }
+    var chatURL: URL? { endpoint("chat/completions") }
+    var modelsURL: URL? { endpoint("models") }
+    var transcriptionsURL: URL? { endpoint("audio/transcriptions") }
+    var host: String { baseURL?.host ?? "" }
 
     /// Cuenta del llavero donde se guarda su API key.
     var keychainAccount: String {
-        switch self {
-        case .groq: return "groq-api-key"
-        case .google: return "google-api-key"
+        switch id {
+        case Self.groq.id: return "groq-api-key"
+        case Self.google.id: return "google-api-key"
+        default: return "\(id)-api-key"
         }
     }
+
+    /// Los proveedores personalizados pueden no pedir key (p. ej. un servidor local).
+    var requiresAPIKey: Bool { isBuiltIn }
 
     var keyPlaceholder: String {
-        switch self {
-        case .groq: return "gsk_…"
-        case .google: return "AIza…"
+        switch id {
+        case Self.groq.id: return "gsk_…"
+        case Self.google.id: return "AIza…"
+        default: return "API key (opcional)"
         }
     }
 
-    var consoleHint: String {
-        switch self {
-        case .groq: return "console.groq.com/keys"
-        case .google: return "aistudio.google.com/apikey"
+    var consoleHint: String? {
+        switch id {
+        case Self.groq.id: return "console.groq.com/keys"
+        case Self.google.id: return "aistudio.google.com/apikey"
+        default: return nil
         }
     }
 }
@@ -170,6 +188,35 @@ enum AppSettings {
         static let llmModel = "settings.llmModel"
         static let googleLLMModel = "settings.googleLLMModel"
         static let llmProvider = "settings.llmProvider"
+        static let transcriptionProvider = "settings.transcriptionProvider"
+        static let customProviders = "settings.customProviders"
+
+        /// Modelo seleccionado de un proveedor (Groq conserva las claves históricas).
+        static func llmModel(for provider: LLMProvider) -> String {
+            switch provider.id {
+            case LLMProvider.groq.id: return Self.llmModel
+            case LLMProvider.google.id: return Self.googleLLMModel
+            default: return "settings.llmModel.\(provider.id)"
+            }
+        }
+
+        static func transcriptionModel(for provider: LLMProvider) -> String {
+            provider.id == LLMProvider.groq.id ? Self.transcriptionModel : "settings.transcriptionModel.\(provider.id)"
+        }
+
+        /// Lista de modelos obtenida de la API para el LLM.
+        static func fetchedLLMModels(for provider: LLMProvider) -> String {
+            switch provider.id {
+            case LLMProvider.groq.id: return Self.fetchedLLMModels
+            case LLMProvider.google.id: return Self.fetchedGoogleModels
+            default: return "settings.fetchedModels.\(provider.id)"
+            }
+        }
+
+        static func fetchedTranscriptionModels(for provider: LLMProvider) -> String {
+            provider.id == LLMProvider.groq.id
+                ? Self.fetchedTranscriptionModels : "settings.fetchedTranscriptionModels.\(provider.id)"
+        }
         static let fetchedGoogleModels = "settings.fetchedGoogleModels"
         static let chunkLength = "settings.chunkLength"
         static let language = "settings.language"
@@ -190,7 +237,7 @@ enum AppSettings {
     static let defaultTranscriptionModel = "whisper-large-v3-turbo"
     static let defaultLLMModel = "openai/gpt-oss-120b"
     static let defaultGoogleLLMModel = "gemini-2.5-flash"
-    static let defaultLLMProvider = LLMProvider.groq.rawValue
+    static let defaultLLMProvider = LLMProvider.groq.id
     static let defaultChunkLength = ChunkLength.five.rawValue
     static let defaultLanguage = TranscriptionLanguage.spanish.rawValue
 
@@ -305,6 +352,7 @@ enum AppSettings {
             Key.llmModel: defaultLLMModel,
             Key.googleLLMModel: defaultGoogleLLMModel,
             Key.llmProvider: defaultLLMProvider,
+            Key.transcriptionProvider: LLMProvider.groq.id,
             Key.chunkLength: defaultChunkLength,
             Key.language: defaultLanguage,
             Key.minutesPrompt: defaultMinutesPrompt,
@@ -318,11 +366,42 @@ enum AppSettings {
     }
 
     static var transcriptionModel: String {
-        nonEmpty(defaults.string(forKey: Key.transcriptionModel)) ?? defaultTranscriptionModel
+        transcriptionModel(for: transcriptionProvider)
+    }
+
+    static func transcriptionModel(for provider: LLMProvider) -> String {
+        nonEmpty(defaults.string(forKey: Key.transcriptionModel(for: provider)))
+            ?? (provider.id == LLMProvider.groq.id ? defaultTranscriptionModel : "whisper-1")
+    }
+
+    // MARK: Proveedores
+
+    static var customProviders: [LLMProvider] {
+        get {
+            guard let data = defaults.data(forKey: Key.customProviders),
+                  let list = try? JSONDecoder().decode([LLMProvider].self, from: data) else { return [] }
+            return list
+        }
+        set {
+            defaults.set(try? JSONEncoder().encode(newValue), forKey: Key.customProviders)
+        }
+    }
+
+    static var allProviders: [LLMProvider] { LLMProvider.builtIn + customProviders }
+
+    static func provider(id: String) -> LLMProvider? {
+        allProviders.first { $0.id == id }
+    }
+
+    /// Proveedor de audio a texto; si el guardado ya no existe o no transcribe, Groq.
+    static var transcriptionProvider: LLMProvider {
+        guard let provider = provider(id: defaults.string(forKey: Key.transcriptionProvider) ?? ""),
+              provider.supportsTranscription else { return .groq }
+        return provider
     }
 
     static var llmProvider: LLMProvider {
-        LLMProvider(rawValue: defaults.string(forKey: Key.llmProvider) ?? "") ?? .groq
+        provider(id: defaults.string(forKey: Key.llmProvider) ?? "") ?? .groq
     }
 
     /// Modelo LLM del proveedor seleccionado.
@@ -331,12 +410,13 @@ enum AppSettings {
     }
 
     static func llmModel(for provider: LLMProvider) -> String {
-        switch provider {
-        case .groq:
-            return nonEmpty(defaults.string(forKey: Key.llmModel)) ?? defaultLLMModel
-        case .google:
-            return nonEmpty(defaults.string(forKey: Key.googleLLMModel)) ?? defaultGoogleLLMModel
+        let fallback: String
+        switch provider.id {
+        case LLMProvider.groq.id: fallback = defaultLLMModel
+        case LLMProvider.google.id: fallback = defaultGoogleLLMModel
+        default: fallback = storedModelList(defaults.string(forKey: Key.fetchedLLMModels(for: provider)) ?? "").first ?? ""
         }
+        return nonEmpty(defaults.string(forKey: Key.llmModel(for: provider))) ?? fallback
     }
 
     static var chunkLength: TimeInterval {

@@ -9,39 +9,41 @@ struct MeetingsListView: View {
     var body: some View {
         NavigationStack(path: $path) {
             List {
-                if !model.hasAPIKey {
+                let transcriptionProvider = AppSettings.transcriptionProvider
+                let llmProvider = AppSettings.llmProvider
+                if !model.hasKey(for: transcriptionProvider) {
                     Section {
                         NoticeRow(
                             systemImage: "key.fill",
-                            title: "Falta la API key de Groq",
-                            message: "Puedes grabar, pero para transcribir y generar la minuta necesitas configurarla.",
+                            title: "Falta la API key de \(transcriptionProvider.label)",
+                            message: "Puedes grabar, pero para transcribir necesitas configurarla.",
                             actionTitle: "Configurar",
                             action: { showSettings = true }
                         )
                     }
                 }
-                ForEach(LLMProvider.allCases) { provider in
-                    if let authError = model.processor.authErrors[provider] {
+                if llmProvider.id != transcriptionProvider.id, !model.hasKey(for: llmProvider) {
+                    Section {
+                        NoticeRow(
+                            systemImage: "key.fill",
+                            title: "Falta la API key de \(llmProvider.label)",
+                            message: "El LLM seleccionado es de \(llmProvider.label): configura su API key para generar resúmenes y minutas.",
+                            actionTitle: "Configurar",
+                            action: { showSettings = true }
+                        )
+                    }
+                }
+                ForEach(model.allProviders) { provider in
+                    if let authError = model.processor.authErrors[provider.id] {
                         Section {
                             NoticeRow(
                                 systemImage: "exclamationmark.triangle.fill",
-                                title: provider == .groq ? "Procesamiento con Groq detenido" : "Procesamiento con Google detenido",
+                                title: "Procesamiento con \(provider.label) detenido",
                                 message: authError,
                                 actionTitle: "Revisar API key",
                                 action: { showSettings = true }
                             )
                         }
-                    }
-                }
-                if AppSettings.llmProvider == .google, model.googleAPIKey.isEmpty {
-                    Section {
-                        NoticeRow(
-                            systemImage: "key.fill",
-                            title: "Falta la API key de Google",
-                            message: "El LLM seleccionado es de Google: configura su API key para generar resúmenes y minutas.",
-                            actionTitle: "Configurar",
-                            action: { showSettings = true }
-                        )
                     }
                 }
                 if let until = model.processor.pausedUntil, model.processor.isPaused {
