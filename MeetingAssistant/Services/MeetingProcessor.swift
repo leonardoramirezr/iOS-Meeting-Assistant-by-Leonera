@@ -11,6 +11,8 @@ final class MeetingProcessor {
     private(set) var authError: String? = nil
     /// Fin de la pausa por límite de cuota (429). Se guarda para reanudar tras reiniciar la app.
     private(set) var pausedUntil: Date? = nil
+    /// Motivo de la pausa en curso (cuota agotada o pausa preventiva).
+    private(set) var pauseReason: String? = nil
     @ObservationIgnored private var apiKey = ""
     @ObservationIgnored private var resumeTask: Task<Void, Never>? = nil
     @ObservationIgnored private var generatingMinutes: Set<UUID> = []
@@ -22,9 +24,11 @@ final class MeetingProcessor {
         self.store = store
         if let until = AppSettings.pausedUntil, until > Date() {
             pausedUntil = until
+            pauseReason = AppSettings.pauseReason
             scheduleResume(at: until)
         } else {
             AppSettings.pausedUntil = nil
+            AppSettings.pauseReason = nil
         }
     }
 
@@ -71,10 +75,26 @@ final class MeetingProcessor {
 
     private func pauseForQuota(_ error: GroqAPIError) {
         let delay = max(AppSettings.quotaPause, error.retryAfter ?? 0)
+        pause(for: delay, reason: "En pausa por límite de cuota de Groq")
+    }
+
+    /// Pausa preventiva: la respuesta indica que quedan pocos tokens en la ventana actual.
+    /// Se espera a que el límite se restablezca (`x-ratelimit-reset-tokens`) o, si Groq no
+    /// lo indica, el tiempo de pausa configurado.
+    private func checkRateLimit(_ info: RateLimitInfo?) {
+        guard AppSettings.preventiveRateLimitPause, let info,
+              info.remainingTokens <= AppSettings.rateLimitTokenThreshold else { return }
+        let delay = max(info.resetTokens ?? AppSettings.quotaPause, 1)
+        pause(for: delay, reason: "Pausa preventiva: quedan \(info.remainingTokens) tokens en el límite de Groq")
+    }
+
+    private func pause(for delay: TimeInterval, reason: String) {
         let until = Date().addingTimeInterval(delay)
         if let current = pausedUntil, current > until { return }
         pausedUntil = until
+        pauseReason = reason
         AppSettings.pausedUntil = until
+        AppSettings.pauseReason = reason
         scheduleResume(at: until)
     }
 
@@ -83,14 +103,18 @@ final class MeetingProcessor {
         resumeTask?.cancel()
         resumeTask = nil
         pausedUntil = nil
+        pauseReason = nil
         AppSettings.pausedUntil = nil
+        AppSettings.pauseReason = nil
         kick()
     }
 
     private func clearExpiredPause() {
         if let pausedUntil, pausedUntil <= Date() {
             self.pausedUntil = nil
+            pauseReason = nil
             AppSettings.pausedUntil = nil
+            AppSettings.pauseReason = nil
         }
     }
 
@@ -165,10 +189,11 @@ final class MeetingProcessor {
         while true {
             attempt += 1
             do {
-                let text = try await client.transcribe(fileURL: job.fileURL, model: model, language: language)
+                let result = try await client.transcribe(fileURL: job.fileURL, model: model, language: language)
+                checkRateLimit(result.rateLimit)
                 store.updateChunk(job.meetingID, index: job.index) { chunk in
                     chunk.status = .done
-                    chunk.transcript = text.trimmingCharacters(in: .whitespacesAndNewlines)
+                    chunk.transcript = result.text.trimmingCharacters(in: .whitespacesAndNewlines)
                     chunk.error = nil
                     chunk.model = model
                 }
@@ -388,6 +413,7 @@ final class MeetingProcessor {
             do {
                 let prepared = try client.prepareChat(model: model, messages: [.init(role: "user", content: message)])
                 let result = try await client.send(prepared)
+                checkRateLimit(result.rateLimit)
                 saveSummary(SegmentSummary(chunkIndices: indices, text: result.content, createdAt: Date(), model: model),
                       in: job.meetingID, plan: plan)
                 return
@@ -507,6 +533,7 @@ final class MeetingProcessor {
                 attempt += 1
                 do {
                     let result = try await client.send(prepared)
+                    checkRateLimit(result.rateLimit)
                     store.update(meetingID) { meeting in
                         meeting.minutes = result.content
                         meeting.minutesStatus = .done

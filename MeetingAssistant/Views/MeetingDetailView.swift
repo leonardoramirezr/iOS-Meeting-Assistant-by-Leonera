@@ -319,7 +319,7 @@ struct ProcessingStatusCard: View {
             StatusCard {
                 VStack(alignment: .leading, spacing: 10) {
                     if let until = model.processor.pausedUntil, model.processor.isPaused {
-                        PauseNotice(until: until) {
+                        PauseNotice(until: until, reason: model.processor.pauseReason) {
                             model.processor.resumeNow()
                         }
                     }
@@ -367,11 +367,12 @@ struct ProcessingStatusCard: View {
 
 struct PauseNotice: View {
     let until: Date
+    var reason: String? = nil
     let resume: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Label("En pausa por límite de cuota de Groq", systemImage: "pause.circle.fill")
+            Label(reason ?? "En pausa por límite de cuota de Groq", systemImage: "pause.circle.fill")
                 .font(.subheadline.weight(.semibold))
                 .foregroundStyle(.orange)
             Text("Se reanuda sola a las \(until.formatted(date: .omitted, time: .standard)) (\(Text(until, style: .relative))).")

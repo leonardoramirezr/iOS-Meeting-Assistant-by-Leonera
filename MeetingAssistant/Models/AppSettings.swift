@@ -123,6 +123,9 @@ enum AppSettings {
         static let quotaPause = "settings.quotaPause"
         /// Fin de la pausa por cuota en curso (timestamp), para reanudar tras reiniciar la app.
         static let pausedUntil = "processing.pausedUntil"
+        static let pauseReason = "processing.pauseReason"
+        static let preventiveRateLimitPause = "settings.preventiveRateLimitPause"
+        static let rateLimitTokenThreshold = "settings.rateLimitTokenThreshold"
     }
 
     static let defaultTranscriptionModel = "whisper-large-v3-turbo"
@@ -134,6 +137,7 @@ enum AppSettings {
     static let defaultMapReduceGroupSize = 5
     static let mapReduceGroupSizeRange = 2...30
     static let defaultQuotaPause = QuotaPause.two.rawValue
+    static let defaultRateLimitTokenThreshold = 1000
 
     /// Separador entre resúmenes de segmentos en la petición de la minuta.
     static let summaryBoundary = "[SEGMENT SUMMARY BOUNDARY]"
@@ -239,6 +243,8 @@ enum AppSettings {
             Key.processingMode: defaultProcessingMode,
             Key.mapReduceGroupSize: defaultMapReduceGroupSize,
             Key.quotaPause: defaultQuotaPause,
+            Key.preventiveRateLimitPause: true,
+            Key.rateLimitTokenThreshold: defaultRateLimitTokenThreshold,
         ])
     }
 
@@ -285,6 +291,20 @@ enum AppSettings {
 
     static var quotaPause: TimeInterval {
         QuotaPause(rawValue: defaults.double(forKey: Key.quotaPause))?.rawValue ?? defaultQuotaPause
+    }
+
+    /// Pausar antes de agotar los tokens cuando `x-ratelimit-remaining-tokens` baja del umbral.
+    static var preventiveRateLimitPause: Bool {
+        defaults.bool(forKey: Key.preventiveRateLimitPause)
+    }
+
+    static var rateLimitTokenThreshold: Int {
+        max(defaults.integer(forKey: Key.rateLimitTokenThreshold), 0)
+    }
+
+    static var pauseReason: String? {
+        get { defaults.string(forKey: Key.pauseReason) }
+        set { defaults.set(newValue, forKey: Key.pauseReason) }
     }
 
     static var pausedUntil: Date? {

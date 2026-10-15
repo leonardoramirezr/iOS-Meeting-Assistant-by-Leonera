@@ -14,6 +14,8 @@ struct SettingsView: View {
     @AppStorage(AppSettings.Key.processingMode) private var processingMode = AppSettings.defaultProcessingMode
     @AppStorage(AppSettings.Key.mapReduceGroupSize) private var groupSize = AppSettings.defaultMapReduceGroupSize
     @AppStorage(AppSettings.Key.quotaPause) private var quotaPause = AppSettings.defaultQuotaPause
+    @AppStorage(AppSettings.Key.preventiveRateLimitPause) private var preventivePause = true
+    @AppStorage(AppSettings.Key.rateLimitTokenThreshold) private var tokenThreshold = AppSettings.defaultRateLimitTokenThreshold
 
     @State private var apiKeyDraft = ""
     @State private var revealKey = false
@@ -33,6 +35,7 @@ struct SettingsView: View {
                 modelsSection
                 recordingSection
                 processingSection
+                rateLimitSection
                 minutesSection
                 aboutSection
             }
@@ -192,6 +195,24 @@ struct SettingsView: View {
             Text("Forma de procesar la minuta")
         } footer: {
             Text(processingFooter)
+        }
+    }
+
+    private var rateLimitSection: some View {
+        Section {
+            Toggle("Pausar antes de agotar los tokens", isOn: $preventivePause)
+            if preventivePause {
+                LabeledContent("Pausar con tokens restantes ≤") {
+                    TextField("1000", value: $tokenThreshold, format: .number)
+                        .keyboardType(.numberPad)
+                        .multilineTextAlignment(.trailing)
+                        .frame(maxWidth: 110)
+                }
+            }
+        } header: {
+            Text("Límite de tokens")
+        } footer: {
+            Text("Si una respuesta de Groq trae x-ratelimit-remaining-tokens menor o igual a \(tokenThreshold), las peticiones se pausan hasta que el límite se restablezca (x-ratelimit-reset-tokens) o, si Groq no lo indica, el tiempo de «Pausa por límite de cuota». Así se evita llegar al límite y que Groq bloquee la cuenta.")
         }
     }
 

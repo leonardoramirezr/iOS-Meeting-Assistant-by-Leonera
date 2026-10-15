@@ -24,7 +24,7 @@ struct RecordingView: View {
                             .frame(maxWidth: .infinity, alignment: .leading)
                     }
                     if let until = model.processor.pausedUntil, model.processor.isPaused {
-                        PauseNotice(until: until) {
+                        PauseNotice(until: until, reason: model.processor.pauseReason) {
                             model.processor.resumeNow()
                         }
                         .frame(maxWidth: .infinity, alignment: .leading)

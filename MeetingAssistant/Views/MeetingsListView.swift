@@ -33,7 +33,7 @@ struct MeetingsListView: View {
                 }
                 if let until = model.processor.pausedUntil, model.processor.isPaused {
                     Section {
-                        PauseNotice(until: until) {
+                        PauseNotice(until: until, reason: model.processor.pauseReason) {
                             model.processor.resumeNow()
                         }
                         .padding(.vertical, 4)

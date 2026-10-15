@@ -37,6 +37,64 @@ struct PreparedChatRequest {
 struct ChatResult {
     let content: String
     let rawResponse: String
+    let rateLimit: RateLimitInfo?
+}
+
+struct TranscriptionResult {
+    let text: String
+    let rateLimit: RateLimitInfo?
+}
+
+/// Cabeceras `x-ratelimit-*-tokens` de una respuesta de Groq.
+struct RateLimitInfo {
+    let remainingTokens: Int
+    /// Tiempo hasta que se restablece el límite de tokens (`x-ratelimit-reset-tokens`).
+    let resetTokens: TimeInterval?
+
+    init?(response: URLResponse) {
+        guard let http = response as? HTTPURLResponse,
+              let remaining = http.value(forHTTPHeaderField: "x-ratelimit-remaining-tokens")
+                .flatMap({ Int($0.trimmingCharacters(in: .whitespaces)) }) else { return nil }
+        remainingTokens = remaining
+        resetTokens = http.value(forHTTPHeaderField: "x-ratelimit-reset-tokens").flatMap(Self.parseDuration)
+    }
+
+    /// Interpreta duraciones como `7.66s`, `2m59.56s`, `1h2m3s` o `250ms`.
+    static func parseDuration(_ text: String) -> TimeInterval? {
+        let value = text.trimmingCharacters(in: .whitespaces).lowercased()
+        if let seconds = TimeInterval(value) { return seconds }
+        var total: TimeInterval = 0
+        var number = ""
+        var index = value.startIndex
+        var matched = false
+        while index < value.endIndex {
+            let character = value[index]
+            if character.isNumber || character == "." {
+                number.append(character)
+                index = value.index(after: index)
+                continue
+            }
+            var unit = String(character)
+            let next = value.index(after: index)
+            if character == "m", next < value.endIndex, value[next] == "s" {
+                unit = "ms"
+                index = value.index(after: next)
+            } else {
+                index = next
+            }
+            guard let amount = TimeInterval(number) else { return nil }
+            switch unit {
+            case "h": total += amount * 3600
+            case "m": total += amount * 60
+            case "s": total += amount
+            case "ms": total += amount / 1000
+            default: return nil
+            }
+            number = ""
+            matched = true
+        }
+        return matched && number.isEmpty ? total : nil
+    }
 }
 
 /// Cliente mínimo de la API compatible con OpenAI de Groq.
@@ -68,7 +126,7 @@ struct GroqClient {
 
     // MARK: Transcripción
 
-    func transcribe(fileURL: URL, model: String, language: String?) async throws -> String {
+    func transcribe(fileURL: URL, model: String, language: String?) async throws -> TranscriptionResult {
         let audio = try Data(contentsOf: fileURL)
         let boundary = "MeetingAssistant-\(UUID().uuidString)"
         var body = Data()
@@ -99,7 +157,8 @@ struct GroqClient {
         let (data, response) = try await Self.session.upload(for: request, from: body)
         try Self.validate(data: data, response: response)
         struct Transcription: Decodable { let text: String }
-        return try JSONDecoder().decode(Transcription.self, from: data).text
+        let text = try JSONDecoder().decode(Transcription.self, from: data).text
+        return TranscriptionResult(text: text, rateLimit: RateLimitInfo(response: response))
     }
 
     // MARK: Chat
@@ -157,7 +216,7 @@ struct GroqClient {
         guard !content.isEmpty else {
             throw GroqAPIError(statusCode: 200, message: "El modelo devolvió una respuesta vacía.", retryAfter: nil, rawResponse: raw)
         }
-        return ChatResult(content: content, rawResponse: raw)
+        return ChatResult(content: content, rawResponse: raw, rateLimit: RateLimitInfo(response: response))
     }
 
     // MARK: Utilidades

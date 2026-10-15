@@ -15,6 +15,7 @@ App para iPhone (SwiftUI, sin dependencias externas) que graba reuniones largas,
   - *Resumen acumulativo*: en orden cronológico, el modelo recibe el resumen acumulado y el siguiente bloque y lo actualiza; la minuta se genera con el resumen final.
 
   Los bloques ya resumidos muestran el símbolo ☁︎✓ (procesado en la nube) y los resúmenes se ven en la pestaña «Resúmenes». Si Groq devuelve un límite de cuota (429), todo el procesamiento se pausa el tiempo configurado y se reanuda solo (o al volver a abrir la app si iOS la suspendió). Al cambiar la forma de procesar se borran los resúmenes de las reuniones sin minuta y se empieza de nuevo.
+- **Pausa preventiva por tokens** (activa por defecto, desactivable): si una respuesta de Groq trae `x-ratelimit-remaining-tokens` menor o igual al umbral configurado (1000 por defecto), todas las peticiones se pausan hasta que el límite se restablezca (`x-ratelimit-reset-tokens`), para no agotar los tokens y evitar bloqueos.
 - **Request raw**: un botón discreto (`{} request raw`, debajo de la minuta, o en el menú `…`) muestra la petición HTTP literal enviada al LLM y su respuesta.
 - **Ajustes**: API key de Groq (guardada en el llavero), modelo exacto de audio a texto y de LLM (lista obtenida de la API o un ID escrito a mano), tamaño de bloque, idioma de la transcripción, prompt de la minuta y generación automática.
 - Copiar y compartir la minuta y la transcripción, reproducir y compartir cada bloque de audio. Los archivos también están visibles en la app Archivos.
