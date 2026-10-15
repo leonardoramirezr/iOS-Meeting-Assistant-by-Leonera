@@ -23,6 +23,12 @@ struct RecordingView: View {
                             .foregroundStyle(.orange)
                             .frame(maxWidth: .infinity, alignment: .leading)
                     }
+                    if let until = model.processor.pausedUntil, model.processor.isPaused {
+                        PauseNotice(until: until) {
+                            model.processor.resumeNow()
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    }
                     RecordedChunksList()
                 }
                 .padding()
@@ -138,6 +144,7 @@ private struct RecordedChunksList: View {
 
     var body: some View {
         let chunks = model.activeMeeting?.chunks ?? []
+        let summarized = model.activeMeeting?.summarizedIndices ?? []
         if !chunks.isEmpty {
             VStack(alignment: .leading, spacing: 10) {
                 Text("Bloques guardados")
@@ -154,6 +161,9 @@ private struct RecordedChunksList: View {
                                 .lineLimit(2)
                         }
                         Spacer(minLength: 0)
+                        if summarized.contains(chunk.index) {
+                            CloudProcessedBadge()
+                        }
                     }
                 }
             }
@@ -213,5 +223,14 @@ struct ChunkStatusIcon: View {
             }
         }
         .frame(width: 20, height: 20)
+    }
+}
+
+/// Indica que el bloque ya se resumió en la nube.
+struct CloudProcessedBadge: View {
+    var body: some View {
+        Image(systemName: "checkmark.icloud.fill")
+            .foregroundStyle(.blue)
+            .accessibilityLabel("Procesado en la nube")
     }
 }

@@ -11,6 +11,9 @@ struct SettingsView: View {
     @AppStorage(AppSettings.Key.autoGenerateMinutes) private var autoGenerateMinutes = true
     @AppStorage(AppSettings.Key.fetchedTranscriptionModels) private var fetchedTranscriptionModels = ""
     @AppStorage(AppSettings.Key.fetchedLLMModels) private var fetchedLLMModels = ""
+    @AppStorage(AppSettings.Key.processingMode) private var processingMode = AppSettings.defaultProcessingMode
+    @AppStorage(AppSettings.Key.mapReduceGroupSize) private var groupSize = AppSettings.defaultMapReduceGroupSize
+    @AppStorage(AppSettings.Key.quotaPause) private var quotaPause = AppSettings.defaultQuotaPause
 
     @State private var apiKeyDraft = ""
     @State private var revealKey = false
@@ -29,6 +32,7 @@ struct SettingsView: View {
                 groqSection
                 modelsSection
                 recordingSection
+                processingSection
                 minutesSection
                 aboutSection
             }
@@ -47,6 +51,12 @@ struct SettingsView: View {
             }
             .onDisappear {
                 saveKey()
+            }
+            .onChange(of: processingMode) { _, _ in
+                model.processor.kick()
+            }
+            .onChange(of: groupSize) { _, _ in
+                model.processor.kick()
             }
         }
     }
@@ -141,6 +151,47 @@ struct SettingsView: View {
             Text("Grabación")
         } footer: {
             Text("Cada vez que se cumple el tamaño de bloque, el clip se cierra y se envía a Whisper mientras la grabación sigue en un clip nuevo. El cambio aplica a la siguiente grabación. Máximo 3 horas por reunión.")
+        }
+    }
+
+    private var selectedMode: ProcessingMode {
+        ProcessingMode(rawValue: processingMode) ?? .fullTranscript
+    }
+
+    private var processingFooter: String {
+        var text = selectedMode.detail
+        if selectedMode == .mapReduce {
+            let length = ChunkLength(rawValue: chunkLength)?.label ?? Format.duration(chunkLength)
+            text += " Cada grupo reúne \(groupSize) bloques de \(length) (≈ \(Format.duration(Double(groupSize) * chunkLength)))."
+        }
+        text += "\n\nSi Groq responde con un límite de cuota (429), el procesamiento se pausa ese tiempo y se reanuda solo; si iOS suspende la app, se reanuda al volver a abrirla."
+        text += " Al cambiar la forma de procesar se borran los resúmenes de las reuniones sin minuta y se empieza de nuevo."
+        return text
+    }
+
+    private var processingSection: some View {
+        Section {
+            Picker("Forma de procesar", selection: $processingMode) {
+                ForEach(ProcessingMode.allCases) { mode in
+                    Text(mode.label).tag(mode.rawValue)
+                }
+            }
+            .pickerStyle(.inline)
+            .labelsHidden()
+            if selectedMode == .mapReduce {
+                Stepper(value: $groupSize, in: AppSettings.mapReduceGroupSizeRange) {
+                    LabeledContent("Bloques por grupo", value: "\(groupSize)")
+                }
+            }
+            Picker("Pausa por límite de cuota", selection: $quotaPause) {
+                ForEach(QuotaPause.allCases) { option in
+                    Text(option.label).tag(option.rawValue)
+                }
+            }
+        } header: {
+            Text("Forma de procesar la minuta")
+        } footer: {
+            Text(processingFooter)
         }
     }
 

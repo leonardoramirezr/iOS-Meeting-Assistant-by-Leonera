@@ -31,6 +31,14 @@ struct MeetingsListView: View {
                         )
                     }
                 }
+                if let until = model.processor.pausedUntil, model.processor.isPaused {
+                    Section {
+                        PauseNotice(until: until) {
+                            model.processor.resumeNow()
+                        }
+                        .padding(.vertical, 4)
+                    }
+                }
                 if model.store.meetings.isEmpty {
                     ContentUnavailableView(
                         "Sin reuniones",
@@ -170,7 +178,14 @@ struct MeetingStatusLabel: View {
         if meeting.isTranscribing {
             return "Transcribiendo \(meeting.transcribedCount) de \(meeting.chunks.count) bloques"
         }
+        let plan = AppSettings.summaryPlan
+        if plan.mode.usesSummaries, meeting.minutesStatus == .none || meeting.minutesStatus == .queued,
+           !meeting.summariesComplete(for: plan) {
+            let progress = meeting.summaryProgress(for: plan)
+            return "Resumiendo \(progress.done) de \(progress.total)"
+        }
         switch meeting.minutesStatus {
+        case .queued: return "Minuta en cola"
         case .generating: return "Generando minuta…"
         case .failed: return "Error al generar la minuta"
         case .done: return "Minuta lista"
@@ -184,6 +199,7 @@ struct MeetingStatusLabel: View {
         if meeting.isRecording { return "record.circle" }
         if meeting.isTranscribing { return "waveform" }
         switch meeting.minutesStatus {
+        case .queued: return "hourglass"
         case .generating: return "sparkles"
         case .failed: return "exclamationmark.triangle"
         case .done: return "doc.text"
@@ -195,6 +211,7 @@ struct MeetingStatusLabel: View {
         if meeting.isRecording { return .red }
         if meeting.isTranscribing { return .blue }
         switch meeting.minutesStatus {
+        case .queued: return .purple
         case .generating: return .purple
         case .failed: return .orange
         case .done: return .green

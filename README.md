@@ -8,6 +8,13 @@ App para iPhone (SwiftUI, sin dependencias externas) que graba reuniones largas,
 - **Grabación por bloques**: cada 1, 2.5, 5 o 10 minutos (se configura en Ajustes) el clip actual se cierra y se guarda, y la grabación sigue sin cortes en un clip nuevo. Cada clip cerrado se envía a Whisper mientras se sigue grabando.
 - **Transcripción con Whisper** (Groq `audio/transcriptions`), un bloque tras otro, con reintentos automáticos ante errores de red o límites de uso. Los bloques que fallan se pueden reintentar a mano.
 - **Minuta con un LLM** (Groq `chat/completions`): al terminar la transcripción se envía el prompt (editable) seguido de la transcripción de todos los bloques, separados por `[TRANSCRIPTION CHUNK BOUNDARY]`. El prompt predeterminado define la estructura de la minuta y su última sección es «Acuerdos y asuntos pendientes».
+- **Formas de procesar la minuta** (Ajustes › Forma de procesar la minuta, mutuamente excluyentes):
+  - *Transcripción completa*: todos los bloques concatenados en una sola petición (lógica original).
+  - *Resumir cada bloque*: un resumen por bloque mientras se graba; la minuta se genera con los resúmenes concatenados.
+  - *Agrupar bloques (Map-Reduce)*: se unen N bloques consecutivos (configurable), se resume cada grupo y la minuta sintetiza los resúmenes.
+  - *Resumen acumulativo*: en orden cronológico, el modelo recibe el resumen acumulado y el siguiente bloque y lo actualiza; la minuta se genera con el resumen final.
+
+  Los bloques ya resumidos muestran el símbolo ☁︎✓ (procesado en la nube) y los resúmenes se ven en la pestaña «Resúmenes». Si Groq devuelve un límite de cuota (429), todo el procesamiento se pausa el tiempo configurado y se reanuda solo (o al volver a abrir la app si iOS la suspendió). Al cambiar la forma de procesar se borran los resúmenes de las reuniones sin minuta y se empieza de nuevo.
 - **Request raw**: un botón discreto (`{} request raw`, debajo de la minuta, o en el menú `…`) muestra la petición HTTP literal enviada al LLM y su respuesta.
 - **Ajustes**: API key de Groq (guardada en el llavero), modelo exacto de audio a texto y de LLM (lista obtenida de la API o un ID escrito a mano), tamaño de bloque, idioma de la transcripción, prompt de la minuta y generación automática.
 - Copiar y compartir la minuta y la transcripción, reproducir y compartir cada bloque de audio. Los archivos también están visibles en la app Archivos.

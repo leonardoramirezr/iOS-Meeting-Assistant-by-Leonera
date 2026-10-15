@@ -9,6 +9,7 @@ struct MeetingDetailView: View {
     enum DetailTab: String, CaseIterable, Identifiable {
         case minutes = "Minuta"
         case transcript = "Transcripción"
+        case summaries = "Resúmenes"
         var id: Self { self }
     }
 
@@ -26,12 +27,16 @@ struct MeetingDetailView: View {
         }
     }
 
+    private func tabs(for meeting: Meeting) -> [DetailTab] {
+        meeting.summaries.isEmpty ? [.minutes, .transcript] : DetailTab.allCases
+    }
+
     private func content(_ meeting: Meeting) -> some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
                 MeetingHeader(meeting: meeting)
                 Picker("Vista", selection: $tab) {
-                    ForEach(DetailTab.allCases) { option in
+                    ForEach(tabs(for: meeting)) { option in
                         Text(option.rawValue).tag(option)
                     }
                 }
@@ -42,6 +47,12 @@ struct MeetingDetailView: View {
                     MinutesSection(meeting: meeting, showRawRequest: $showRawRequest)
                 case .transcript:
                     TranscriptSection(meeting: meeting)
+                case .summaries:
+                    if meeting.summaries.isEmpty {
+                        MinutesSection(meeting: meeting, showRawRequest: $showRawRequest)
+                    } else {
+                        SummariesSection(meeting: meeting)
+                    }
                 }
             }
             .padding()
@@ -151,6 +162,7 @@ private struct MinutesSection: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
+            ProcessingStatusCard(meeting: meeting)
             if meeting.minutesStatus == .generating {
                 StatusCard {
                     HStack(spacing: 12) {
@@ -187,6 +199,13 @@ private struct MinutesSection: View {
                 minutesFooter(minutes)
             } else if meeting.minutesStatus == .none {
                 pendingState
+            } else if meeting.minutesStatus == .queued {
+                StatusCard {
+                    Label("La minuta está en cola: se generará en cuanto terminen los resúmenes o la pausa por cuota.",
+                          systemImage: "hourglass")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
             }
 
             if meeting.lastLLMExchange != nil {
@@ -285,6 +304,124 @@ private struct MinutesSection: View {
     }
 }
 
+// MARK: - Estado del procesamiento
+
+/// Pausa por cuota, progreso de los resúmenes y errores de resumen.
+struct ProcessingStatusCard: View {
+    @Environment(AppModel.self) private var model
+    let meeting: Meeting
+
+    var body: some View {
+        let plan = AppSettings.summaryPlan
+        let showsSummaries = plan.mode.usesSummaries
+            && meeting.minutesStatus != .done && meeting.minutesStatus != .generating
+        if model.processor.isPaused || showsSummaries {
+            StatusCard {
+                VStack(alignment: .leading, spacing: 10) {
+                    if let until = model.processor.pausedUntil, model.processor.isPaused {
+                        PauseNotice(until: until) {
+                            model.processor.resumeNow()
+                        }
+                    }
+                    if showsSummaries {
+                        summaryProgress(plan)
+                    }
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func summaryProgress(_ plan: SummaryPlan) -> some View {
+        let progress = meeting.summaryProgress(for: plan)
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Label(plan.mode.label, systemImage: "icloud.and.arrow.up")
+                    .font(.subheadline.weight(.semibold))
+                Spacer()
+                if model.processor.isSummarizing {
+                    ProgressView()
+                        .controlSize(.small)
+                }
+            }
+            ProgressView(value: Double(progress.done), total: Double(max(progress.total, 1)))
+            Text(plan.mode == .iterative
+                 ? "\(progress.done) de \(progress.total) bloques integrados al resumen acumulado."
+                 : "\(progress.done) de \(progress.total) segmentos resumidos.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            if let error = meeting.summaryError {
+                Text(error)
+                    .font(.footnote)
+                    .foregroundStyle(.orange)
+                    .textSelection(.enabled)
+                Button("Reintentar resúmenes") {
+                    model.processor.retrySummaries(meeting.id)
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+            }
+        }
+    }
+}
+
+struct PauseNotice: View {
+    let until: Date
+    let resume: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Label("En pausa por límite de cuota de Groq", systemImage: "pause.circle.fill")
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.orange)
+            Text("Se reanuda sola a las \(until.formatted(date: .omitted, time: .standard)) (\(Text(until, style: .relative))).")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Button("Reanudar ahora", action: resume)
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+        }
+    }
+}
+
+// MARK: - Resúmenes
+
+private struct SummariesSection: View {
+    let meeting: Meeting
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            if meeting.summaryPlan?.mode == .iterative, let last = meeting.summaries.last {
+                Text("Resumen acumulado tras \(meeting.summaries.count) bloque(s)")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                StatusCard {
+                    MarkdownView(markdown: last.text)
+                }
+            } else {
+                Text("\(meeting.summaries.count) resumen(es) · \(meeting.summaryPlan?.mode.label ?? "")")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                ForEach(Array(meeting.summaries.enumerated()), id: \.offset) { _, summary in
+                    StatusCard {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Label(title(summary), systemImage: "checkmark.icloud.fill")
+                                .font(.subheadline.weight(.semibold))
+                            MarkdownView(markdown: summary.text)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private func title(_ summary: SegmentSummary) -> String {
+        let first = (summary.chunkIndices.first ?? 0) + 1
+        let last = (summary.chunkIndices.last ?? 0) + 1
+        return first == last ? "Bloque \(first)" : "Bloques \(first)–\(last)"
+    }
+}
+
 // MARK: - Transcripción
 
 private struct TranscriptSection: View {
@@ -336,8 +473,14 @@ private struct ChunkCard: View {
                 HStack(spacing: 8) {
                     ChunkStatusIcon(status: chunk.status)
                     VStack(alignment: .leading, spacing: 0) {
-                        Text("Bloque \(chunk.index + 1)")
-                            .font(.subheadline.weight(.semibold))
+                        HStack(spacing: 6) {
+                            Text("Bloque \(chunk.index + 1)")
+                                .font(.subheadline.weight(.semibold))
+                            if meeting.isSummarized(chunk) {
+                                CloudProcessedBadge()
+                                    .font(.caption)
+                            }
+                        }
                         Text("\(Format.clock(start)) – \(Format.clock(start + chunk.duration))")
                             .font(.caption)
                             .monospacedDigit()

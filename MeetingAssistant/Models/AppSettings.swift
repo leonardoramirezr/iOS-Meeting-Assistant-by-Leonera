@@ -44,6 +44,69 @@ enum TranscriptionLanguage: String, CaseIterable, Identifiable {
     }
 }
 
+/// Forma de procesar la minuta. Las opciones son mutuamente excluyentes.
+enum ProcessingMode: String, CaseIterable, Identifiable, Codable {
+    /// Lógica original: todas las transcripciones concatenadas en una sola petición.
+    case fullTranscript
+    /// Un resumen por bloque; la minuta se genera con los resúmenes concatenados.
+    case perChunk
+    /// Se agrupan N bloques, se resume cada grupo y la minuta sintetiza esos resúmenes.
+    case mapReduce
+    /// Resumen acumulativo: el modelo actualiza un resumen con cada bloque, en orden.
+    case iterative
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .fullTranscript: return "Transcripción completa"
+        case .perChunk: return "Resumir cada bloque"
+        case .mapReduce: return "Agrupar bloques (Map-Reduce)"
+        case .iterative: return "Resumen acumulativo"
+        }
+    }
+
+    var detail: String {
+        switch self {
+        case .fullTranscript:
+            return "Todos los bloques se envían concatenados en una sola petición para generar la minuta."
+        case .perChunk:
+            return "Se resume cada bloque por separado mientras se graba; la minuta se genera con los resúmenes concatenados."
+        case .mapReduce:
+            return "Se unen varios bloques consecutivos, se obtiene un resumen estructurado de cada grupo y la minuta se genera con esos resúmenes concatenados."
+        case .iterative:
+            return "Los bloques se procesan en orden: el modelo recibe el resumen acumulado y el siguiente bloque, y actualiza el resumen. La minuta se genera con el resumen final."
+        }
+    }
+
+    var usesSummaries: Bool { self != .fullTranscript }
+}
+
+/// Configuración con la que se generaron los resúmenes de una reunión.
+struct SummaryPlan: Codable, Hashable {
+    var mode: ProcessingMode
+    /// Bloques por segmento (1 salvo en Map-Reduce).
+    var groupSize: Int
+}
+
+/// Tiempo de espera tras un error de límite de cuota (429).
+enum QuotaPause: Double, CaseIterable, Identifiable {
+    case one = 60
+    case two = 120
+    case five = 300
+    case ten = 600
+    case fifteen = 900
+    case thirty = 1800
+    case sixty = 3600
+
+    var id: Double { rawValue }
+
+    var label: String {
+        let minutes = Int(rawValue / 60)
+        return minutes == 60 ? "1 hora" : "\(minutes) min"
+    }
+}
+
 /// Preferencias de la app guardadas en `UserDefaults` (la API key va en el llavero).
 enum AppSettings {
     enum Key {
@@ -55,12 +118,25 @@ enum AppSettings {
         static let autoGenerateMinutes = "settings.autoGenerateMinutes"
         static let fetchedTranscriptionModels = "settings.fetchedTranscriptionModels"
         static let fetchedLLMModels = "settings.fetchedLLMModels"
+        static let processingMode = "settings.processingMode"
+        static let mapReduceGroupSize = "settings.mapReduceGroupSize"
+        static let quotaPause = "settings.quotaPause"
+        /// Fin de la pausa por cuota en curso (timestamp), para reanudar tras reiniciar la app.
+        static let pausedUntil = "processing.pausedUntil"
     }
 
     static let defaultTranscriptionModel = "whisper-large-v3-turbo"
     static let defaultLLMModel = "openai/gpt-oss-120b"
     static let defaultChunkLength = ChunkLength.five.rawValue
     static let defaultLanguage = TranscriptionLanguage.spanish.rawValue
+
+    static let defaultProcessingMode = ProcessingMode.fullTranscript.rawValue
+    static let defaultMapReduceGroupSize = 5
+    static let mapReduceGroupSizeRange = 2...30
+    static let defaultQuotaPause = QuotaPause.two.rawValue
+
+    /// Separador entre resúmenes de segmentos en la petición de la minuta.
+    static let summaryBoundary = "[SEGMENT SUMMARY BOUNDARY]"
 
     /// Duración máxima de una grabación.
     static let maxRecordingDuration: TimeInterval = 3 * 60 * 60
@@ -115,6 +191,41 @@ enum AppSettings {
     Transcripción:
     """
 
+    /// Prompt para resumir un bloque o un grupo de bloques (modos "Resumir cada bloque" y Map-Reduce).
+    static let segmentSummaryPrompt = """
+    Eres un asistente que resume fragmentos de reuniones de trabajo para redactar después una minuta.
+
+    A continuación recibirás un fragmento de la transcripción automática (Whisper) de una reunión. Puede estar formado por varios bloques consecutivos separados por [TRANSCRIPTION CHUNK BOUNDARY]; una frase puede quedar partida en esos puntos. La transcripción no indica quién habla y puede tener errores de reconocimiento: corrígelos solo cuando el contexto lo deje claro, ignora artefactos evidentes (como «Gracias por ver el video») y no inventes nada.
+
+    Devuelve un resumen estructurado en español, en Markdown, con estas secciones (omite las que no tengan contenido):
+    - **Temas:** temas tratados en el fragmento.
+    - **Puntos clave:** ideas, posturas y argumentos relevantes.
+    - **Datos y cifras:** números, fechas, nombres propios mencionados.
+    - **Decisiones:** decisiones concretas tomadas.
+    - **Acuerdos y pendientes:** tareas o compromisos, con responsable y fecha si se mencionan.
+
+    Si el fragmento no tiene contenido relevante, responde solo «Sin contenido relevante».
+    """
+
+    /// Prompt del resumen acumulativo (iterative refinement).
+    static let iterativeSummaryPrompt = """
+    Eres un asistente que mantiene actualizado el resumen de una reunión de trabajo mientras avanza.
+
+    Recibirás el RESUMEN ACUMULADO hasta ahora (vacío al empezar) y el SIGUIENTE SEGMENTO de la transcripción automática (Whisper). El segmento puede empezar o terminar con frases partidas; la transcripción no indica quién habla y puede tener errores de reconocimiento: corrígelos solo cuando el contexto lo deje claro, ignora artefactos evidentes y no inventes nada.
+
+    Devuelve el resumen acumulado actualizado, en español y en Markdown: integra la información nueva, conserva todo lo importante del resumen anterior (no lo acortes ni pierdas detalles relevantes), corrige lo que el nuevo segmento aclare y mantén el orden cronológico. Usa estas secciones:
+    - **Temas tratados:** en orden, con sus puntos clave, posturas y datos o cifras.
+    - **Decisiones:** decisiones concretas tomadas.
+    - **Acuerdos y pendientes:** tareas o compromisos, con responsable y fecha si se mencionan.
+    - **Preguntas abiertas:** temas sin resolver.
+
+    Responde solo con el resumen actualizado.
+    """
+
+    /// Aclaración que precede a los resúmenes cuando la minuta no se genera con la transcripción literal.
+    static let summariesNote = "Nota: en lugar de la transcripción literal, a continuación se incluyen resúmenes consecutivos de la reunión, en orden cronológico y separados por [SEGMENT SUMMARY BOUNDARY]. Úsalos como si fueran la transcripción."
+    static let iterativeNote = "Nota: en lugar de la transcripción literal, a continuación se incluye un resumen acumulativo de toda la reunión, construido en orden cronológico. Úsalo como si fuera la transcripción."
+
     private static var defaults: UserDefaults { .standard }
 
     static func registerDefaults() {
@@ -125,6 +236,9 @@ enum AppSettings {
             Key.language: defaultLanguage,
             Key.minutesPrompt: defaultMinutesPrompt,
             Key.autoGenerateMinutes: true,
+            Key.processingMode: defaultProcessingMode,
+            Key.mapReduceGroupSize: defaultMapReduceGroupSize,
+            Key.quotaPause: defaultQuotaPause,
         ])
     }
 
@@ -152,6 +266,39 @@ enum AppSettings {
 
     static var autoGenerateMinutes: Bool {
         defaults.bool(forKey: Key.autoGenerateMinutes)
+    }
+
+    static var processingMode: ProcessingMode {
+        ProcessingMode(rawValue: defaults.string(forKey: Key.processingMode) ?? "") ?? .fullTranscript
+    }
+
+    static var mapReduceGroupSize: Int {
+        let value = defaults.integer(forKey: Key.mapReduceGroupSize)
+        return mapReduceGroupSizeRange.contains(value) ? value : defaultMapReduceGroupSize
+    }
+
+    /// Plan actual: el tamaño de grupo solo cuenta en Map-Reduce.
+    static var summaryPlan: SummaryPlan {
+        let mode = processingMode
+        return SummaryPlan(mode: mode, groupSize: mode == .mapReduce ? mapReduceGroupSize : 1)
+    }
+
+    static var quotaPause: TimeInterval {
+        QuotaPause(rawValue: defaults.double(forKey: Key.quotaPause))?.rawValue ?? defaultQuotaPause
+    }
+
+    static var pausedUntil: Date? {
+        get {
+            let value = defaults.double(forKey: Key.pausedUntil)
+            return value > 0 ? Date(timeIntervalSince1970: value) : nil
+        }
+        set {
+            if let newValue {
+                defaults.set(newValue.timeIntervalSince1970, forKey: Key.pausedUntil)
+            } else {
+                defaults.removeObject(forKey: Key.pausedUntil)
+            }
+        }
     }
 
     /// Lista guardada (separada por saltos de línea) de modelos obtenidos de la API.
