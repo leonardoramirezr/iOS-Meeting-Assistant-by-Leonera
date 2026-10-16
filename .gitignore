@@ -1,0 +1,17 @@
+# Generado por XcodeGen
+*.xcodeproj/
+
+# Xcode
+build/
+DerivedData/
+xcuserdata/
+*.xcuserstate
+*.ipa
+*.dSYM.zip
+*.dSYM
+
+# macOS
+.DS_Store
+
+# Python
+__pycache__/
