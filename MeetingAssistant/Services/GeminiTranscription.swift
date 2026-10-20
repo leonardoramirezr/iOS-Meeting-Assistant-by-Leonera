@@ -136,12 +136,27 @@ extension GroqClient {
         struct Candidate: Decodable {
             struct Content: Decodable {
                 struct Part: Decodable {
+                    /// Segmento reconocido: el texto puede venir aquí en vez de en `text`.
+                    struct AudioTranscription: Decodable {
+                        struct Word: Decodable { let word: String? }
+                        let transcript: String?
+                        let text: String?
+                        let words: [Word]?
+
+                        var plainText: String {
+                            if let transcript, !transcript.isEmpty { return transcript }
+                            if let text, !text.isEmpty { return text }
+                            return (words ?? []).compactMap(\.word).joined(separator: " ")
+                        }
+                    }
                     let text: String?
                     let thought: Bool?
+                    let audioTranscription: AudioTranscription?
                 }
                 let parts: [Part]?
             }
             let content: Content?
+            let finishReason: String?
         }
         struct PromptFeedback: Decodable { let blockReason: String? }
         let candidates: [Candidate]?
@@ -173,7 +188,23 @@ extension GroqClient {
                                message: "Google bloqueó la transcripción (\(reason)).", retryAfter: nil,
                                rawResponse: Self.rawResponse(data: data, response: response))
         }
-        let parts = result.candidates?.first?.content?.parts ?? []
-        return parts.filter { $0.thought != true }.compactMap(\.text).joined()
+        let candidate = result.candidates?.first
+        let parts = (candidate?.content?.parts ?? []).filter { $0.thought != true }
+        var text = parts.compactMap(\.text).joined()
+        if text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            // Sin `text`: se arma con los segmentos `audioTranscription` (uno por turno).
+            text = parts.compactMap { $0.audioTranscription?.plainText }
+                .filter { !$0.isEmpty }
+                .joined(separator: "\n")
+        }
+        guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            // No se da por bueno un bloque vacío: el error muestra lo que respondió Google.
+            let reason = candidate?.finishReason ?? "sin candidatos"
+            let body = String(decoding: data, as: UTF8.self)
+            throw GroqAPIError(provider: provider, statusCode: 200,
+                               message: "Google no devolvió texto (finishReason: \(reason)). Respuesta: \(body.prefix(800))",
+                               retryAfter: nil, rawResponse: Self.rawResponse(data: data, response: response))
+        }
+        return text
     }
 }
