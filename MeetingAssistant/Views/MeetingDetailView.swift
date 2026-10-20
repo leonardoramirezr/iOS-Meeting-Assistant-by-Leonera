@@ -429,6 +429,7 @@ private struct TranscriptSection: View {
     @Environment(AppModel.self) private var model
     let meeting: Meeting
     @State private var copied = false
+    @State private var confirmRegenerate = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -456,7 +457,63 @@ private struct TranscriptSection: View {
             ForEach(meeting.chunks) { chunk in
                 ChunkCard(meeting: meeting, chunk: chunk)
             }
+            if !meeting.chunks.isEmpty {
+                transcriptFooter
+            }
         }
+        .confirmationDialog("¿Regenerar la transcripción?", isPresented: $confirmRegenerate, titleVisibility: .visible) {
+            Button("Regenerar con \(currentModelLabel)") {
+                model.processor.regenerateTranscript(meeting.id)
+            }
+        } message: {
+            Text("Se volverán a transcribir los \(meeting.chunks.count) bloques y se reemplazará el texto actual. La minuta no cambia hasta que la regeneres.")
+        }
+    }
+
+    /// Modelo de audio a texto seleccionado ahora mismo en Ajustes.
+    private var currentModelLabel: String {
+        let provider = AppSettings.transcriptionProvider
+        return "\(AppSettings.transcriptionModel(for: provider)) (\(provider.label))"
+    }
+
+    /// Modelos con los que se generó la transcripción y fecha del último bloque transcrito.
+    private var generatedNote: String? {
+        let done = meeting.chunks.filter { $0.status == .done }
+        var labels: [String] = []
+        for label in done.compactMap(\.modelLabel) where !labels.contains(label) {
+            labels.append(label)
+        }
+        guard !labels.isEmpty else { return nil }
+        var note = "Generada con \(labels.joined(separator: ", "))"
+        if let date = done.compactMap(\.transcribedAt).max() {
+            note += " · \(date.formatted(date: .abbreviated, time: .shortened))"
+        }
+        return note
+    }
+
+    private var transcriptFooter: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            if let generatedNote {
+                Text(generatedNote)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            HStack {
+                Text("Modelo seleccionado: \(currentModelLabel)")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Button {
+                    confirmRegenerate = true
+                } label: {
+                    Label("Regenerar", systemImage: "arrow.clockwise")
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .disabled(!meeting.canRegenerateTranscript || !model.hasAPIKey)
+            }
+        }
+        .padding(.top, 8)
     }
 }
 
@@ -518,6 +575,11 @@ private struct ChunkCard: View {
                 .font(.callout)
                 .foregroundStyle(text.isEmpty ? Color.secondary : Color.primary)
                 .textSelection(.enabled)
+            if let label = chunk.modelLabel {
+                Text("Generado con \(label)")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+            }
         case .pending:
             Text(chunk.error ?? "En cola para transcribir.")
                 .font(.footnote)

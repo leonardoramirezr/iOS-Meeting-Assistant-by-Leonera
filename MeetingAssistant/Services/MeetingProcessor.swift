@@ -177,6 +177,20 @@ final class MeetingProcessor {
         kick()
     }
 
+    /// Vuelve a transcribir todos los bloques con el modelo de audio a texto seleccionado
+    /// en Ajustes (se lee al procesar cada bloque). El texto anterior de cada bloque se
+    /// reemplaza cuando llega el nuevo.
+    func regenerateTranscript(_ meetingID: UUID) {
+        guard let meeting = store.meeting(meetingID), meeting.canRegenerateTranscript else { return }
+        for chunk in meeting.chunks {
+            store.updateChunk(meetingID, index: chunk.index) { chunk in
+                chunk.status = .pending
+                chunk.error = nil
+            }
+        }
+        kick()
+    }
+
     private func drainQueue() async {
         let activity = BackgroundActivity(name: "transcription")
         defer { activity.end() }
@@ -218,6 +232,8 @@ final class MeetingProcessor {
                     chunk.transcript = result.text.trimmingCharacters(in: .whitespacesAndNewlines)
                     chunk.error = nil
                     chunk.model = model
+                    chunk.provider = transcriptionProvider.label
+                    chunk.transcribedAt = Date()
                 }
                 invalidateSummaries(job.meetingID, containing: job.index)
                 kickSummaries()
