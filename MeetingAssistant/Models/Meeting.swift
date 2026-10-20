@@ -16,8 +16,17 @@ struct AudioChunk: Codable, Identifiable, Hashable {
     var transcript: String?
     var error: String?
     var model: String?
+    /// Proveedor de audio a texto con el que se transcribió (nombre visible).
+    var provider: String?
+    var transcribedAt: Date?
 
     var id: Int { index }
+
+    /// «modelo (proveedor)» de la transcripción, si se conoce.
+    var modelLabel: String? {
+        guard let model else { return nil }
+        return provider.map { "\(model) (\($0))" } ?? model
+    }
 }
 
 enum MinutesStatus: String, Codable {
@@ -89,6 +98,10 @@ struct Meeting: Codable, Identifiable, Hashable {
                 return text
             }
             .joined(separator: "\n\n\(AppSettings.chunkBoundary)\n\n")
+    }
+
+    var canRegenerateTranscript: Bool {
+        !isRecording && !isTranscribing && !chunks.isEmpty
     }
 
     var canGenerateMinutes: Bool {
