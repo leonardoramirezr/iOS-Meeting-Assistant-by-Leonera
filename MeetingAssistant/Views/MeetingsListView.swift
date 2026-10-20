@@ -15,30 +15,30 @@ struct MeetingsListView: View {
                     Section {
                         NoticeRow(
                             systemImage: "key.fill",
-                            title: "Falta la API key de \(transcriptionProvider.label)",
+                            title: "Falta la API key de \(transcriptionProvider.keyLabel)",
                             message: "Puedes grabar, pero para transcribir necesitas configurarla.",
                             actionTitle: "Configurar",
                             action: { showSettings = true }
                         )
                     }
                 }
-                if llmProvider.id != transcriptionProvider.id, !model.hasKey(for: llmProvider) {
+                if llmProvider.credentialID != transcriptionProvider.credentialID, !model.hasKey(for: llmProvider) {
                     Section {
                         NoticeRow(
                             systemImage: "key.fill",
-                            title: "Falta la API key de \(llmProvider.label)",
+                            title: "Falta la API key de \(llmProvider.keyLabel)",
                             message: "El LLM seleccionado es de \(llmProvider.label): configura su API key para generar resúmenes y minutas.",
                             actionTitle: "Configurar",
                             action: { showSettings = true }
                         )
                     }
                 }
-                ForEach(model.allProviders) { provider in
+                ForEach(model.allProviders.filter { $0.credentialID == $0.id }) { provider in
                     if let authError = model.processor.authErrors[provider.id] {
                         Section {
                             NoticeRow(
                                 systemImage: "exclamationmark.triangle.fill",
-                                title: "Procesamiento con \(provider.label) detenido",
+                                title: "Procesamiento con \(provider.keyLabel) detenido",
                                 message: authError,
                                 actionTitle: "Revisar API key",
                                 action: { showSettings = true }

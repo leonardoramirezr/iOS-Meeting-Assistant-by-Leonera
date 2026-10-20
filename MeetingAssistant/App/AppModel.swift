@@ -10,7 +10,7 @@ final class AppModel {
     let processor: MeetingProcessor
     let player: AudioPlayer
 
-    /// API keys guardadas en el llavero, por `LLMProvider.id`.
+    /// API keys guardadas en el llavero, por `LLMProvider.credentialID`.
     private(set) var apiKeys: [String: String] = [:]
     /// Proveedores compatibles con OpenAI añadidos por el usuario.
     private(set) var customProviders: [LLMProvider] = []
@@ -29,7 +29,7 @@ final class AppModel {
         customProviders = AppSettings.customProviders
         for provider in AppSettings.allProviders {
             let key = Keychain.read(provider.keychainAccount) ?? ""
-            apiKeys[provider.id] = key
+            apiKeys[provider.credentialID] = key
             processor.updateAPIKey(key, for: provider)
         }
     }
@@ -53,13 +53,13 @@ final class AppModel {
     var allProviders: [LLMProvider] { LLMProvider.builtIn + customProviders }
 
     func apiKey(for provider: LLMProvider) -> String {
-        apiKeys[provider.id, default: ""]
+        apiKeys[provider.credentialID, default: ""]
     }
 
     func saveAPIKey(_ key: String, for provider: LLMProvider = .groq) {
         let trimmed = key.trimmingCharacters(in: .whitespacesAndNewlines)
         guard trimmed != apiKey(for: provider) else { return }
-        apiKeys[provider.id] = trimmed
+        apiKeys[provider.credentialID] = trimmed
         if trimmed.isEmpty {
             Keychain.delete(provider.keychainAccount)
         } else {

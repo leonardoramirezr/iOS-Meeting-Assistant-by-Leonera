@@ -19,7 +19,7 @@ enum ChunkLength: Double, CaseIterable, Identifiable {
     }
 }
 
-/// Idioma que se envía a Whisper. Vacío = detección automática.
+/// Idioma que se envía al modelo de audio a texto. Vacío = detección automática.
 enum TranscriptionLanguage: String, CaseIterable, Identifiable {
     case automatic = ""
     case spanish = "es"
@@ -42,10 +42,24 @@ enum TranscriptionLanguage: String, CaseIterable, Identifiable {
         case .italian: return "Italiano"
         }
     }
+
+    /// Código BCP-47 para la API nativa de Gemini (`languageCodes`); `nil` = detección automática.
+    var bcp47Code: String? {
+        switch self {
+        case .automatic: return nil
+        case .spanish: return "es-419"
+        case .english: return "en-US"
+        case .portuguese: return "pt-BR"
+        case .french: return "fr-FR"
+        case .german: return "de-DE"
+        case .italian: return "it-IT"
+        }
+    }
 }
 
 /// Proveedor con API compatible con OpenAI: Groq y Google vienen integrados y el usuario
-/// puede añadir otros (nombre + URL base). Se identifica por `id`.
+/// puede añadir otros (nombre + URL base). Se identifica por `id`. Excepción: `googleNative`
+/// usa la API nativa de Gemini y solo sirve para audio a texto.
 struct LLMProvider: Codable, Hashable, Identifiable {
     var id: String
     var name: String
@@ -56,18 +70,33 @@ struct LLMProvider: Codable, Hashable, Identifiable {
 
     static let groq = LLMProvider(id: "groq", name: "Groq",
                                   baseURLString: "https://api.groq.com/openai/v1/", supportsTranscription: true)
-    static let google = LLMProvider(id: "google", name: "Google",
+    static let google = LLMProvider(id: "google", name: "Google (API OpenAI-compatible)",
                                     baseURLString: "https://generativelanguage.googleapis.com/v1beta/openai/",
                                     supportsTranscription: false)
-    static let builtIn = [groq, google]
+    /// API nativa de Gemini (`models/<modelo>:generateContent` + Files API). Comparte la key de `google`.
+    static let googleNative = LLMProvider(id: "google-native", name: "Google (API nativa)",
+                                          baseURLString: "https://generativelanguage.googleapis.com/v1beta/",
+                                          supportsTranscription: true)
+    static let builtIn = [groq, google, googleNative]
+    /// Integrados con API key propia: cada uno tiene su sección de key en Ajustes.
+    static let builtInKeyHolders = [groq, google]
 
     static func custom(name: String, baseURL: String, supportsTranscription: Bool) -> LLMProvider {
         LLMProvider(id: "custom-\(UUID().uuidString)", name: name, baseURLString: baseURL,
                     supportsTranscription: supportsTranscription)
     }
 
-    var isBuiltIn: Bool { id == Self.groq.id || id == Self.google.id }
+    var isBuiltIn: Bool { Self.builtIn.contains { $0.id == id } }
     var label: String { name }
+
+    var isGeminiNative: Bool { id == Self.googleNative.id }
+    /// Se puede usar como LLM (`chat/completions`); la API nativa solo transcribe.
+    var supportsChat: Bool { !isGeminiNative }
+
+    /// Proveedor dueño de la API key: las dos APIs de Google usan la misma.
+    var credentialID: String { isGeminiNative ? Self.google.id : id }
+    /// Nombre de la API key en la interfaz («Google» para ambas APIs de Google).
+    var keyLabel: String { credentialID == Self.google.id ? "Google" : name }
 
     /// URL base normalizada (siempre termina en "/" para resolver rutas relativas).
     var baseURL: URL? {
@@ -79,7 +108,7 @@ struct LLMProvider: Codable, Hashable, Identifiable {
         return url
     }
 
-    private func endpoint(_ path: String) -> URL? {
+    func endpoint(_ path: String) -> URL? {
         baseURL.flatMap { URL(string: path, relativeTo: $0)?.absoluteURL }
     }
 
@@ -88,9 +117,22 @@ struct LLMProvider: Codable, Hashable, Identifiable {
     var transcriptionsURL: URL? { endpoint("audio/transcriptions") }
     var host: String { baseURL?.host ?? "" }
 
+    /// API nativa de Gemini: `<base>/models/<modelo>:generateContent`.
+    func generateContentURL(model: String) -> URL? { endpoint("models/\(model):generateContent") }
+
+    /// Subida reanudable de la Files API: `https://<host>/upload/<ruta base>/files`.
+    var fileUploadURL: URL? {
+        guard let baseURL, var components = URLComponents(url: baseURL, resolvingAgainstBaseURL: false) else {
+            return nil
+        }
+        // La URL base siempre termina en "/" (p. ej. "/v1beta/").
+        components.path = "/upload" + components.path + "files"
+        return components.url
+    }
+
     /// Cuenta del llavero donde se guarda su API key.
     var keychainAccount: String {
-        switch id {
+        switch credentialID {
         case Self.groq.id: return "groq-api-key"
         case Self.google.id: return "google-api-key"
         default: return "\(id)-api-key"
@@ -101,7 +143,7 @@ struct LLMProvider: Codable, Hashable, Identifiable {
     var requiresAPIKey: Bool { isBuiltIn }
 
     var keyPlaceholder: String {
-        switch id {
+        switch credentialID {
         case Self.groq.id: return "gsk_…"
         case Self.google.id: return "AIza…"
         default: return "API key (opcional)"
@@ -109,7 +151,7 @@ struct LLMProvider: Codable, Hashable, Identifiable {
     }
 
     var consoleHint: String? {
-        switch id {
+        switch credentialID {
         case Self.groq.id: return "console.groq.com/keys"
         case Self.google.id: return "aistudio.google.com/apikey"
         default: return nil
@@ -235,6 +277,7 @@ enum AppSettings {
     }
 
     static let defaultTranscriptionModel = "whisper-large-v3-turbo"
+    static let defaultGoogleTranscriptionModel = "gemini-3.5-transcribe"
     static let defaultLLMModel = "openai/gpt-oss-120b"
     static let defaultGoogleLLMModel = "gemini-2.5-flash"
     static let defaultLLMProvider = LLMProvider.groq.id
@@ -259,6 +302,10 @@ enum AppSettings {
     static let suggestedTranscriptionModels = [
         "whisper-large-v3-turbo",
         "whisper-large-v3",
+    ]
+
+    static let suggestedGoogleTranscriptionModels = [
+        "gemini-3.5-transcribe",
     ]
 
     static let suggestedGoogleModels = [
@@ -370,8 +417,13 @@ enum AppSettings {
     }
 
     static func transcriptionModel(for provider: LLMProvider) -> String {
-        nonEmpty(defaults.string(forKey: Key.transcriptionModel(for: provider)))
-            ?? (provider.id == LLMProvider.groq.id ? defaultTranscriptionModel : "whisper-1")
+        let fallback: String
+        switch provider.id {
+        case LLMProvider.groq.id: fallback = defaultTranscriptionModel
+        case LLMProvider.googleNative.id: fallback = defaultGoogleTranscriptionModel
+        default: fallback = "whisper-1"
+        }
+        return nonEmpty(defaults.string(forKey: Key.transcriptionModel(for: provider))) ?? fallback
     }
 
     // MARK: Proveedores
@@ -400,8 +452,11 @@ enum AppSettings {
         return provider
     }
 
+    /// Proveedor del LLM; si el guardado ya no existe o no admite chat, Groq.
     static var llmProvider: LLMProvider {
-        provider(id: defaults.string(forKey: Key.llmProvider) ?? "") ?? .groq
+        guard let provider = provider(id: defaults.string(forKey: Key.llmProvider) ?? ""),
+              provider.supportsChat else { return .groq }
+        return provider
     }
 
     /// Modelo LLM del proveedor seleccionado.

@@ -5,7 +5,7 @@ struct GroqModel: Decodable, Hashable {
     let active: Bool?
 }
 
-/// Error HTTP devuelto por la API (Groq o Google).
+/// Error HTTP devuelto por la API (Groq, Google o un proveedor personalizado).
 struct GroqAPIError: LocalizedError {
     var provider: LLMProvider = .groq
     let statusCode: Int
@@ -104,9 +104,10 @@ struct RateLimitInfo {
 }
 
 /// Cliente mínimo de una API compatible con OpenAI (Groq, Google o un proveedor personalizado).
+/// La transcripción con la API nativa de Gemini está en `GeminiTranscription.swift`.
 struct GroqClient {
 
-    private static let session: URLSession = {
+    static let session: URLSession = {
         let configuration = URLSessionConfiguration.default
         configuration.timeoutIntervalForRequest = 600
         configuration.timeoutIntervalForResource = 1800
@@ -116,7 +117,7 @@ struct GroqClient {
     let apiKey: String
     var provider: LLMProvider = .groq
 
-    private func url(_ url: URL?) throws -> URL {
+    func url(_ url: URL?) throws -> URL {
         guard let url else {
             throw GroqAPIError(provider: provider, statusCode: -1,
                                message: "La URL base «\(provider.baseURLString)» no es válida.",
@@ -160,6 +161,9 @@ struct GroqClient {
     // MARK: Transcripción
 
     func transcribe(fileURL: URL, model: String, language: String?) async throws -> TranscriptionResult {
+        if provider.isGeminiNative {
+            return try await transcribeWithGemini(fileURL: fileURL, model: model, language: language)
+        }
         let audio = try Data(contentsOf: fileURL)
         let boundary = "MeetingAssistant-\(UUID().uuidString)"
         var body = Data()
@@ -319,7 +323,7 @@ struct GroqClient {
         return String(decoding: pretty, as: UTF8.self)
     }
 
-    private static func validate(data: Data, response: URLResponse, raw: String? = nil,
+    static func validate(data: Data, response: URLResponse, raw: String? = nil,
                                  provider: LLMProvider) throws {
         guard let http = response as? HTTPURLResponse else {
             throw GroqAPIError(provider: provider, statusCode: -1, message: "Respuesta no válida.", retryAfter: nil,
