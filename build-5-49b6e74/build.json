@@ -1,0 +1,20 @@
+{
+  "tag": "build-5-49b6e74",
+  "title": "Meeting Assistant by Leonera",
+  "bundle_id": "com.leonardoramirezr.meetingassistantbyleonera",
+  "version": "0.0.5",
+  "build_number": "5",
+  "channel": "prerelease",
+  "branch": "claude/gifted-cori-irnt6s",
+  "commit": "49b6e7421599a8e9577e6f46f5a3c683c3087464",
+  "commit_short": "49b6e74",
+  "commit_message": "Support Google Gemini's OpenAI-compatible API for the LLM",
+  "run_number": 5,
+  "run_url": "https://github.com/leonardoramirezr/iOS-Meeting-Assistant-by-Leonera/actions/runs/38816819183",
+  "devices": "1",
+  "created_at": "2026-10-15T22:25:13Z",
+  "ipa": "MeetingAssistant.ipa",
+  "page_url": "https://leonardoramirezr.github.io/iOS-Meeting-Assistant-by-Leonera/build-5-49b6e74/",
+  "manifest_url": "https://leonardoramirezr.github.io/iOS-Meeting-Assistant-by-Leonera/build-5-49b6e74/manifest.plist",
+  "install_url": "itms-services://?action=download-manifest&url=https%3A%2F%2Fleonardoramirezr.github.io%2FiOS-Meeting-Assistant-by-Leonera%2Fbuild-5-49b6e74%2Fmanifest.plist"
+}

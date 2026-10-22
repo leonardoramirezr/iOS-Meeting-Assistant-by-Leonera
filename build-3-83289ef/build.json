@@ -1,0 +1,20 @@
+{
+  "tag": "build-3-83289ef",
+  "title": "Meeting Assistant by Leonera",
+  "bundle_id": "com.leonardoramirezr.meetingassistantbyleonera",
+  "version": "0.0.3",
+  "build_number": "3",
+  "channel": "prerelease",
+  "branch": "claude/gifted-cori-irnt6s",
+  "commit": "83289ef8508545a85bc1a275872d6b18413d3d9e",
+  "commit_short": "83289ef",
+  "commit_message": "Add configurable ways to process the minutes",
+  "run_number": 3,
+  "run_url": "https://github.com/leonardoramirezr/iOS-Meeting-Assistant-by-Leonera/actions/runs/38810208861",
+  "devices": "1",
+  "created_at": "2026-10-15T21:31:05Z",
+  "ipa": "MeetingAssistant.ipa",
+  "page_url": "https://leonardoramirezr.github.io/iOS-Meeting-Assistant-by-Leonera/build-3-83289ef/",
+  "manifest_url": "https://leonardoramirezr.github.io/iOS-Meeting-Assistant-by-Leonera/build-3-83289ef/manifest.plist",
+  "install_url": "itms-services://?action=download-manifest&url=https%3A%2F%2Fleonardoramirezr.github.io%2FiOS-Meeting-Assistant-by-Leonera%2Fbuild-3-83289ef%2Fmanifest.plist"
+}

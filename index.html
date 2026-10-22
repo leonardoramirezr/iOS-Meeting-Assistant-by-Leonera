@@ -1,0 +1,237 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Meeting Assistant by Leonera</title>
+<style>
+:root { color-scheme: light dark; --bg: #f5f5f7; --card: #ffffff; --text: #1d1d1f; --muted: #6e6e73;
+        --accent: #6d28d9; --accent-text: #ffffff; --border: #e3e3e8; --badge: #ede9fe; --badge-text: #5b21b6; }
+@media (prefers-color-scheme: dark) {
+  :root { --bg: #000000; --card: #1c1c1e; --text: #f5f5f7; --muted: #98989d; --accent: #a78bfa;
+          --accent-text: #1c1033; --border: #2c2c2e; --badge: #2e1065; --badge-text: #ddd6fe; }
+}
+* { box-sizing: border-box; }
+body { margin: 0; font: 16px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+       background: var(--bg); color: var(--text); }
+main { max-width: 680px; margin: 0 auto; padding: 24px 16px 48px; }
+header { display: flex; gap: 16px; align-items: center; margin-bottom: 20px; }
+header img { width: 72px; height: 72px; border-radius: 16px; box-shadow: 0 2px 8px rgba(0,0,0,.15); }
+h1 { font-size: 24px; margin: 0; line-height: 1.2; }
+h2 { font-size: 18px; margin: 28px 0 10px; }
+.muted { color: var(--muted); }
+.small { font-size: 13px; }
+.card { background: var(--card); border: 1px solid var(--border); border-radius: 14px; padding: 14px 16px; margin: 10px 0; }
+.button { display: inline-block; background: var(--accent); color: var(--accent-text); text-decoration: none;
+          font-weight: 600; padding: 10px 18px; border-radius: 12px; }
+.button.big { display: block; text-align: center; font-size: 18px; padding: 14px 18px; margin: 16px 0 8px; }
+.button.secondary { background: transparent; color: var(--accent); border: 1px solid var(--accent); }
+.row { display: flex; justify-content: space-between; gap: 12px; align-items: center; flex-wrap: wrap; }
+.actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.badge { display: inline-block; font-size: 12px; font-weight: 600; padding: 2px 8px; border-radius: 999px;
+         background: var(--badge); color: var(--badge-text); margin-left: 6px; vertical-align: middle; }
+dl { display: grid; grid-template-columns: max-content 1fr; gap: 6px 14px; margin: 0; }
+dt { color: var(--muted); }
+dd { margin: 0; word-break: break-word; }
+code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px; }
+a { color: var(--accent); }
+</style>
+</head>
+<body>
+<main>
+<header>
+  <img src="0.3.0/icon-512.png" alt="">
+  <div>
+    <h1>Meeting Assistant by Leonera</h1>
+    <div class="muted">Instalación Ad Hoc</div>
+  </div>
+</header>
+<a class="button big" href="itms-services://?action=download-manifest&amp;url=https%3A%2F%2Fleonardoramirezr.github.io%2FiOS-Meeting-Assistant-by-Leonera%2F0.3.0%2Fmanifest.plist">Instalar la última versión estable (0.3.0)</a>
+<p class="muted small">Abre esta página en <strong>Safari</strong> desde el iPhone. Solo se puede instalar en iPhones cuyo UDID esté registrado en la cuenta de Apple Developer; si iOS lo pide, activa el Modo de desarrollador en Ajustes › Privacidad y seguridad.</p>
+<h2>Versiones estables (main)</h2>
+<div class="card">
+  <div class="row">
+    <div>
+      <strong>0.3.0</strong><span class="badge">Estable</span>
+      <div class="muted small">0.3.0 (14) · main · e3e5f09 · 2026-10-22 14:09 UTC</div>
+      <div class="small">Borrar la transcripción de un bloque con confirmación y regenerarla al volver a transcribir (#4)</div>
+    </div>
+    <div class="actions">
+      <a class="button" href="itms-services://?action=download-manifest&amp;url=https%3A%2F%2Fleonardoramirezr.github.io%2FiOS-Meeting-Assistant-by-Leonera%2F0.3.0%2Fmanifest.plist">Instalar</a>
+      <a class="button secondary" href="0.3.0/">Detalles</a>
+    </div>
+  </div>
+</div>
+<div class="card">
+  <div class="row">
+    <div>
+      <strong>0.2.0</strong><span class="badge">Estable</span>
+      <div class="muted small">0.2.0 (10) · main · 35c0db6 · 2026-10-20 17:34 UTC</div>
+      <div class="small">Botón para regenerar la transcripción con el modelo seleccionado y nota «Generado con …» (#3)</div>
+    </div>
+    <div class="actions">
+      <a class="button" href="itms-services://?action=download-manifest&amp;url=https%3A%2F%2Fleonardoramirezr.github.io%2FiOS-Meeting-Assistant-by-Leonera%2F0.2.0%2Fmanifest.plist">Instalar</a>
+      <a class="button secondary" href="0.2.0/">Detalles</a>
+    </div>
+  </div>
+</div>
+<div class="card">
+  <div class="row">
+    <div>
+      <strong>0.1.0</strong><span class="badge">Estable</span>
+      <div class="muted small">0.1.0 (7) · main · 9ef33ed · 2026-10-16 18:24 UTC</div>
+      <div class="small">Meeting Assistant: grabación por bloques, Whisper + minuta con Groq y CI Ad Hoc a GitHub Pages (#1)</div>
+    </div>
+    <div class="actions">
+      <a class="button" href="itms-services://?action=download-manifest&amp;url=https%3A%2F%2Fleonardoramirezr.github.io%2FiOS-Meeting-Assistant-by-Leonera%2F0.1.0%2Fmanifest.plist">Instalar</a>
+      <a class="button secondary" href="0.1.0/">Detalles</a>
+    </div>
+  </div>
+</div>
+<h2>Builds de ramas (últimos 20)</h2>
+<div class="card">
+  <div class="row">
+    <div>
+      <strong>build-13-c5bfd5e</strong><span class="badge">Pre-release</span>
+      <div class="muted small">0.2.13 (13) · claude/delete-transcript-blocks-41e3d1 · c5bfd5e · 2026-10-22 02:45 UTC</div>
+      <div class="small">Borrar la transcripción de un bloque con confirmación y regenerarla al volver a transcribir</div>
+    </div>
+    <div class="actions">
+      <a class="button" href="itms-services://?action=download-manifest&amp;url=https%3A%2F%2Fleonardoramirezr.github.io%2FiOS-Meeting-Assistant-by-Leonera%2Fbuild-13-c5bfd5e%2Fmanifest.plist">Instalar</a>
+      <a class="button secondary" href="build-13-c5bfd5e/">Detalles</a>
+    </div>
+  </div>
+</div>
+<div class="card">
+  <div class="row">
+    <div>
+      <strong>build-12-90767a0</strong><span class="badge">Pre-release</span>
+      <div class="muted small">0.2.12 (12) · claude/gemini-api-native-support-05s0n2 · 90767a0 · 2026-10-20 18:39 UTC</div>
+      <div class="small">Gemini nativa: leer el texto de audioTranscription y no dar por vacío un bloque sin texto</div>
+    </div>
+    <div class="actions">
+      <a class="button" href="itms-services://?action=download-manifest&amp;url=https%3A%2F%2Fleonardoramirezr.github.io%2FiOS-Meeting-Assistant-by-Leonera%2Fbuild-12-90767a0%2Fmanifest.plist">Instalar</a>
+      <a class="button secondary" href="build-12-90767a0/">Detalles</a>
+    </div>
+  </div>
+</div>
+<div class="card">
+  <div class="row">
+    <div>
+      <strong>build-11-189ad1a</strong><span class="badge">Pre-release</span>
+      <div class="muted small">0.2.11 (11) · claude/gemini-api-native-support-05s0n2 · 189ad1a · 2026-10-20 18:23 UTC</div>
+      <div class="small">Merge main into claude/gemini-api-native-support-05s0n2</div>
+    </div>
+    <div class="actions">
+      <a class="button" href="itms-services://?action=download-manifest&amp;url=https%3A%2F%2Fleonardoramirezr.github.io%2FiOS-Meeting-Assistant-by-Leonera%2Fbuild-11-189ad1a%2Fmanifest.plist">Instalar</a>
+      <a class="button secondary" href="build-11-189ad1a/">Detalles</a>
+    </div>
+  </div>
+</div>
+<div class="card">
+  <div class="row">
+    <div>
+      <strong>build-9-a7d9a4e</strong><span class="badge">Pre-release</span>
+      <div class="muted small">0.1.9 (9) · regenerar-transcripcion · a7d9a4e · 2026-10-20 06:35 UTC</div>
+      <div class="small">Botón para regenerar la transcripción con el modelo seleccionado y nota «Generado con …»</div>
+    </div>
+    <div class="actions">
+      <a class="button" href="itms-services://?action=download-manifest&amp;url=https%3A%2F%2Fleonardoramirezr.github.io%2FiOS-Meeting-Assistant-by-Leonera%2Fbuild-9-a7d9a4e%2Fmanifest.plist">Instalar</a>
+      <a class="button secondary" href="build-9-a7d9a4e/">Detalles</a>
+    </div>
+  </div>
+</div>
+<div class="card">
+  <div class="row">
+    <div>
+      <strong>build-8-7f4e5f1</strong><span class="badge">Pre-release</span>
+      <div class="muted small">0.1.8 (8) · claude/gemini-api-native-support-05s0n2 · 7f4e5f1 · 2026-10-20 00:05 UTC</div>
+      <div class="small">Audio a texto con la API nativa de Gemini (gemini-3.5-transcribe)</div>
+    </div>
+    <div class="actions">
+      <a class="button" href="itms-services://?action=download-manifest&amp;url=https%3A%2F%2Fleonardoramirezr.github.io%2FiOS-Meeting-Assistant-by-Leonera%2Fbuild-8-7f4e5f1%2Fmanifest.plist">Instalar</a>
+      <a class="button secondary" href="build-8-7f4e5f1/">Detalles</a>
+    </div>
+  </div>
+</div>
+<div class="card">
+  <div class="row">
+    <div>
+      <strong>build-6-07a7473</strong><span class="badge">Pre-release</span>
+      <div class="muted small">0.0.6 (6) · claude/gifted-cori-irnt6s · 07a7473 · 2026-10-15 22:33 UTC</div>
+      <div class="small">Allow adding any OpenAI-compatible provider</div>
+    </div>
+    <div class="actions">
+      <a class="button" href="itms-services://?action=download-manifest&amp;url=https%3A%2F%2Fleonardoramirezr.github.io%2FiOS-Meeting-Assistant-by-Leonera%2Fbuild-6-07a7473%2Fmanifest.plist">Instalar</a>
+      <a class="button secondary" href="build-6-07a7473/">Detalles</a>
+    </div>
+  </div>
+</div>
+<div class="card">
+  <div class="row">
+    <div>
+      <strong>build-5-49b6e74</strong><span class="badge">Pre-release</span>
+      <div class="muted small">0.0.5 (5) · claude/gifted-cori-irnt6s · 49b6e74 · 2026-10-15 22:25 UTC</div>
+      <div class="small">Support Google Gemini&#x27;s OpenAI-compatible API for the LLM</div>
+    </div>
+    <div class="actions">
+      <a class="button" href="itms-services://?action=download-manifest&amp;url=https%3A%2F%2Fleonardoramirezr.github.io%2FiOS-Meeting-Assistant-by-Leonera%2Fbuild-5-49b6e74%2Fmanifest.plist">Instalar</a>
+      <a class="button secondary" href="build-5-49b6e74/">Detalles</a>
+    </div>
+  </div>
+</div>
+<div class="card">
+  <div class="row">
+    <div>
+      <strong>build-4-78363a3</strong><span class="badge">Pre-release</span>
+      <div class="muted small">0.0.4 (4) · claude/gifted-cori-irnt6s · 78363a3 · 2026-10-15 22:13 UTC</div>
+      <div class="small">Pause requests before exhausting Groq&#x27;s token rate limit</div>
+    </div>
+    <div class="actions">
+      <a class="button" href="itms-services://?action=download-manifest&amp;url=https%3A%2F%2Fleonardoramirezr.github.io%2FiOS-Meeting-Assistant-by-Leonera%2Fbuild-4-78363a3%2Fmanifest.plist">Instalar</a>
+      <a class="button secondary" href="build-4-78363a3/">Detalles</a>
+    </div>
+  </div>
+</div>
+<div class="card">
+  <div class="row">
+    <div>
+      <strong>build-3-83289ef</strong><span class="badge">Pre-release</span>
+      <div class="muted small">0.0.3 (3) · claude/gifted-cori-irnt6s · 83289ef · 2026-10-15 21:31 UTC</div>
+      <div class="small">Add configurable ways to process the minutes</div>
+    </div>
+    <div class="actions">
+      <a class="button" href="itms-services://?action=download-manifest&amp;url=https%3A%2F%2Fleonardoramirezr.github.io%2FiOS-Meeting-Assistant-by-Leonera%2Fbuild-3-83289ef%2Fmanifest.plist">Instalar</a>
+      <a class="button secondary" href="build-3-83289ef/">Detalles</a>
+    </div>
+  </div>
+</div>
+<div class="card">
+  <div class="row">
+    <div>
+      <strong>build-2-2046d1d</strong><span class="badge">Pre-release</span>
+      <div class="muted small">0.0.2 (2) · claude/gifted-cori-irnt6s · 2046d1d · 2026-10-15 19:57 UTC</div>
+      <div class="small">Use actions/checkout@v5 (Node 24)</div>
+    </div>
+    <div class="actions">
+      <a class="button" href="itms-services://?action=download-manifest&amp;url=https%3A%2F%2Fleonardoramirezr.github.io%2FiOS-Meeting-Assistant-by-Leonera%2Fbuild-2-2046d1d%2Fmanifest.plist">Instalar</a>
+      <a class="button secondary" href="build-2-2046d1d/">Detalles</a>
+    </div>
+  </div>
+</div>
+<div class="card">
+  <div class="row">
+    <div>
+      <strong>build-1-626a63e</strong><span class="badge">Pre-release</span>
+      <div class="muted small">0.0.1 (1) · claude/gifted-cori-irnt6s · 626a63e · 2026-10-15 19:54 UTC</div>
+      <div class="small">Add Meeting Assistant app and signed Ad Hoc CI pipeline</div>
+    </div>
+    <div class="actions">
+      <a class="button" href="itms-services://?action=download-manifest&amp;url=https%3A%2F%2Fleonardoramirezr.github.io%2FiOS-Meeting-Assistant-by-Leonera%2Fbuild-1-626a63e%2Fmanifest.plist">Instalar</a>
+      <a class="button secondary" href="build-1-626a63e/">Detalles</a>
+    </div>
+  </div>
+</div>
+</main>
+</body>
+</html>

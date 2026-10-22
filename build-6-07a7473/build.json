@@ -1,0 +1,20 @@
+{
+  "tag": "build-6-07a7473",
+  "title": "Meeting Assistant by Leonera",
+  "bundle_id": "com.leonardoramirezr.meetingassistantbyleonera",
+  "version": "0.0.6",
+  "build_number": "6",
+  "channel": "prerelease",
+  "branch": "claude/gifted-cori-irnt6s",
+  "commit": "07a747340df38466d1bd07fa490894c919260817",
+  "commit_short": "07a7473",
+  "commit_message": "Allow adding any OpenAI-compatible provider",
+  "run_number": 6,
+  "run_url": "https://github.com/leonardoramirezr/iOS-Meeting-Assistant-by-Leonera/actions/runs/38817762118",
+  "devices": "1",
+  "created_at": "2026-10-15T22:33:40Z",
+  "ipa": "MeetingAssistant.ipa",
+  "page_url": "https://leonardoramirezr.github.io/iOS-Meeting-Assistant-by-Leonera/build-6-07a7473/",
+  "manifest_url": "https://leonardoramirezr.github.io/iOS-Meeting-Assistant-by-Leonera/build-6-07a7473/manifest.plist",
+  "install_url": "itms-services://?action=download-manifest&url=https%3A%2F%2Fleonardoramirezr.github.io%2FiOS-Meeting-Assistant-by-Leonera%2Fbuild-6-07a7473%2Fmanifest.plist"
+}
