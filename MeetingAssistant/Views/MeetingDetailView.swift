@@ -466,7 +466,7 @@ private struct TranscriptSection: View {
                 model.processor.regenerateTranscript(meeting.id)
             }
         } message: {
-            Text("Se volverán a transcribir los \(meeting.chunks.count) bloques y se reemplazará el texto actual. La minuta no cambia hasta que la regeneres.")
+            Text("Se volverán a transcribir los \(meeting.chunks.count) bloques (incluidos los borrados) y se reemplazará el texto actual. La minuta no cambia hasta que la regeneres.")
         }
     }
 
@@ -521,6 +521,12 @@ private struct ChunkCard: View {
     @Environment(AppModel.self) private var model
     let meeting: Meeting
     let chunk: AudioChunk
+    @State private var confirmDelete = false
+
+    /// Solo se borran bloques que ya terminaron de transcribirse (o fallaron).
+    private var canDelete: Bool {
+        chunk.status == .done || chunk.status == .failed
+    }
 
     var body: some View {
         let url = model.store.audioURL(meetingID: meeting.id, chunk: chunk)
@@ -560,9 +566,28 @@ private struct ChunkCard: View {
                     }
                     .buttonStyle(.borderless)
                     .accessibilityLabel("Compartir audio")
+                    if canDelete {
+                        Button(role: .destructive) {
+                            confirmDelete = true
+                        } label: {
+                            Image(systemName: "trash")
+                                .font(.title3)
+                        }
+                        .buttonStyle(.borderless)
+                        .tint(.red)
+                        .accessibilityLabel("Borrar transcripción del bloque")
+                    }
                 }
                 chunkBody
             }
+        }
+        .confirmationDialog("¿Borrar la transcripción del bloque \(chunk.index + 1)?",
+                            isPresented: $confirmDelete, titleVisibility: .visible) {
+            Button("Borrar transcripción", role: .destructive) {
+                model.processor.deleteChunkTranscript(meeting.id, index: chunk.index)
+            }
+        } message: {
+            Text("El audio se conserva. El bloque se volverá a generar cuando regeneres la transcripción.")
         }
     }
 
@@ -599,6 +624,18 @@ private struct ChunkCard: View {
                 }
                 .buttonStyle(.bordered)
                 .controlSize(.small)
+            }
+        case .deleted:
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Transcripción eliminada. Se volverá a generar al regenerar la transcripción.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                Button("Transcribir de nuevo") {
+                    model.processor.retryChunk(meeting.id, index: chunk.index)
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .disabled(!model.hasAPIKey)
             }
         }
     }

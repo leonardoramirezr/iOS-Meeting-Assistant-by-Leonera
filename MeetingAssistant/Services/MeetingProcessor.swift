@@ -177,9 +177,27 @@ final class MeetingProcessor {
         kick()
     }
 
+    /// Borra la transcripción de un bloque (el audio se conserva). Se vuelve a generar
+    /// al regenerar la transcripción o al pedir transcribir de nuevo ese bloque.
+    func deleteChunkTranscript(_ meetingID: UUID, index: Int) {
+        guard let chunk = store.meeting(meetingID)?.chunks.first(where: { $0.index == index }),
+              chunk.status == .done || chunk.status == .failed else { return }
+        store.updateChunk(meetingID, index: index) { chunk in
+            chunk.status = .deleted
+            chunk.transcript = nil
+            chunk.error = nil
+            chunk.model = nil
+            chunk.provider = nil
+            chunk.transcribedAt = nil
+        }
+        invalidateSummaries(meetingID, containing: index)
+        kickSummaries()
+        checkCompletion(meetingID)
+    }
+
     /// Vuelve a transcribir todos los bloques con el modelo de audio a texto seleccionado
     /// en Ajustes (se lee al procesar cada bloque). El texto anterior de cada bloque se
-    /// reemplaza cuando llega el nuevo.
+    /// reemplaza cuando llega el nuevo; los bloques borrados también se regeneran.
     func regenerateTranscript(_ meetingID: UUID) {
         guard let meeting = store.meeting(meetingID), meeting.canRegenerateTranscript else { return }
         for chunk in meeting.chunks {
@@ -303,9 +321,9 @@ final class MeetingProcessor {
         }
     }
 
-    /// Un bloque "asentado" ya no cambiará: está transcrito o falló.
+    /// Un bloque "asentado" ya no cambiará: está transcrito, falló o se borró.
     private static func isSettled(_ chunk: AudioChunk) -> Bool {
-        chunk.status == .done || chunk.status == .failed
+        chunk.status == .done || chunk.status == .failed || chunk.status == .deleted
     }
 
     private func nextSummaryJob() -> SummaryJob? {
