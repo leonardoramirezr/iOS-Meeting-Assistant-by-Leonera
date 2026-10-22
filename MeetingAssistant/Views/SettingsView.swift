@@ -22,7 +22,7 @@ struct SettingsView: View {
     var body: some View {
         NavigationStack {
             Form {
-                ForEach(LLMProvider.builtIn) { provider in
+                ForEach(LLMProvider.builtInKeyHolders) { provider in
                     APIKeySection(provider: provider, load: { try await loadModels(for: provider) })
                 }
                 customProvidersSection
@@ -67,8 +67,13 @@ struct SettingsView: View {
         transcriptionProviders.first { $0.id == transcriptionProviderID } ?? .groq
     }
 
+    /// La API nativa de Google solo transcribe: no aparece como LLM.
+    private var llmProviders: [LLMProvider] {
+        model.allProviders.filter(\.supportsChat)
+    }
+
     private var llmProvider: LLMProvider {
-        model.allProviders.first { $0.id == llmProviderID } ?? .groq
+        llmProviders.first { $0.id == llmProviderID } ?? .groq
     }
 
     private func storedString(_ key: String, default fallback: String) -> Binding<String> {
@@ -103,12 +108,12 @@ struct SettingsView: View {
                 title: "Modelo de audio a texto",
                 selection: storedString(AppSettings.Key.transcriptionModel(for: transcription),
                                         default: AppSettings.transcriptionModel(for: transcription)),
-                options: merged(transcription.id == LLMProvider.groq.id ? AppSettings.suggestedTranscriptionModels : [],
+                options: merged(suggestedTranscriptionModels(for: transcription),
                                 fetchedList(AppSettings.Key.fetchedTranscriptionModels(for: transcription)))
             )
             .id("transcription-\(transcription.id)")
             Picker("Proveedor del LLM", selection: $llmProviderID) {
-                ForEach(model.allProviders) { provider in
+                ForEach(llmProviders) { provider in
                     Text(provider.label).tag(provider.id)
                 }
             }
@@ -123,7 +128,15 @@ struct SettingsView: View {
         } header: {
             Text("Modelos")
         } footer: {
-            Text("Elige primero el proveedor y después el modelo. La transcripción solo puede usar proveedores con /audio/transcriptions (Groq, o uno personalizado marcado así): la API compatible con OpenAI de Google no la ofrece. Usa «Guardar, probar y cargar modelos» de cada proveedor para traer su lista actual, o elige «Otro…» para escribir el ID exacto.")
+            Text("Elige primero el proveedor y después el modelo. Google tiene dos opciones con la misma API key: la API nativa (gemini-3.5-transcribe) solo para audio a texto y la API OpenAI-compatible solo para el LLM. Para transcribir también sirven Groq o un proveedor personalizado con /audio/transcriptions. Usa «Guardar, probar y cargar modelos» de cada proveedor para traer su lista actual, o elige «Otro…» para escribir el ID exacto.")
+        }
+    }
+
+    private func suggestedTranscriptionModels(for provider: LLMProvider) -> [String] {
+        switch provider.id {
+        case LLMProvider.groq.id: return AppSettings.suggestedTranscriptionModels
+        case LLMProvider.googleNative.id: return AppSettings.suggestedGoogleTranscriptionModels
+        default: return []
         }
     }
 
@@ -177,7 +190,7 @@ struct SettingsView: View {
         } header: {
             Text("Grabación")
         } footer: {
-            Text("Cada vez que se cumple el tamaño de bloque, el clip se cierra y se envía a Whisper mientras la grabación sigue en un clip nuevo. El cambio aplica a la siguiente grabación. Máximo 3 horas por reunión.")
+            Text("Cada vez que se cumple el tamaño de bloque, el clip se cierra y se envía a transcribir mientras la grabación sigue en un clip nuevo. El cambio aplica a la siguiente grabación. Máximo 3 horas por reunión.")
         }
     }
 
@@ -281,10 +294,17 @@ struct SettingsView: View {
             defaults.set(chat.joined(separator: "\n"), forKey: AppSettings.Key.fetchedLLMModels(for: provider))
             message = "API key válida · \(transcription.count) modelos de audio y \(chat.count) de texto"
         case LLMProvider.google.id:
-            let excluded = ["embedding", "imagen", "veo", "aqa", "tts", "image-generation", "native-audio", "live"]
+            // La misma key sirve para la API nativa: sus modelos de audio a texto van a «Google (API nativa)».
+            let excluded = ["embedding", "imagen", "veo", "aqa", "tts", "image-generation", "native-audio", "live",
+                            "transcribe"]
             let chat = ids.filter { id in !excluded.contains { id.localizedCaseInsensitiveContains($0) } }
+            let transcription = ids.filter { id in
+                id.localizedCaseInsensitiveContains("transcribe") && !id.localizedCaseInsensitiveContains("live")
+            }
             defaults.set(chat.joined(separator: "\n"), forKey: AppSettings.Key.fetchedLLMModels(for: provider))
-            message = "API key válida · \(chat.count) modelos de texto"
+            defaults.set(transcription.joined(separator: "\n"),
+                         forKey: AppSettings.Key.fetchedTranscriptionModels(for: .googleNative))
+            message = "API key válida · \(transcription.count) modelos de audio y \(chat.count) de texto"
         default:
             // Proveedor personalizado: se muestran todos los modelos; los de audio también
             // para la transcripción (o todos si ninguno lo parece).
@@ -469,9 +489,11 @@ struct APIKeySection: View {
                 EmptyView()
             }
         } header: {
-            Text(provider.label)
+            Text(provider.keyLabel)
         } footer: {
-            if let hint = provider.consoleHint {
+            if provider.id == LLMProvider.google.id, let hint = provider.consoleHint {
+                Text("La API key se guarda en el llavero del iPhone y la usan las dos APIs de Google (nativa y OpenAI-compatible). Puedes crear una en \(hint).")
+            } else if let hint = provider.consoleHint {
                 Text("La API key se guarda en el llavero del iPhone. Puedes crear una en \(hint).")
             } else {
                 Text("La API key se guarda en el llavero del iPhone.")

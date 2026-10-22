@@ -1,14 +1,14 @@
 import Foundation
 import Observation
 
-/// Cola de transcripción (Whisper), de resúmenes por segmento y de generación de minutas (LLM).
+/// Cola de transcripción (audio a texto), de resúmenes por segmento y de generación de minutas (LLM).
 @MainActor
 @Observable
 final class MeetingProcessor {
     private(set) var isProcessingQueue = false
     private(set) var isSummarizing = false
     /// Último rechazo de la API key de cada proveedor; su cola se detiene hasta que la key cambie.
-    /// Indexado por `LLMProvider.id`.
+    /// Indexado por `LLMProvider.credentialID` (las dos APIs de Google comparten key).
     private(set) var authErrors: [String: String] = [:]
     /// Fin de la pausa por límite de cuota (429). Se guarda para reanudar tras reiniciar la app.
     private(set) var pausedUntil: Date? = nil
@@ -34,20 +34,20 @@ final class MeetingProcessor {
     }
 
     func updateAPIKey(_ key: String, for provider: LLMProvider) {
-        if key != apiKeys[provider.id, default: ""] {
-            apiKeys[provider.id] = key
-            authErrors[provider.id] = nil
+        if key != apiKeys[provider.credentialID, default: ""] {
+            apiKeys[provider.credentialID] = key
+            authErrors[provider.credentialID] = nil
         }
         kick()
     }
 
     private func key(for provider: LLMProvider) -> String {
-        apiKeys[provider.id, default: ""]
+        apiKeys[provider.credentialID, default: ""]
     }
 
     /// Los proveedores personalizados pueden funcionar sin key (p. ej. un servidor local).
     private func hasUsableKey(_ provider: LLMProvider) -> Bool {
-        (!key(for: provider).isEmpty || !provider.requiresAPIKey) && authErrors[provider.id] == nil
+        (!key(for: provider).isEmpty || !provider.requiresAPIKey) && authErrors[provider.credentialID] == nil
     }
 
     /// Transcripción con el proveedor de audio a texto seleccionado (Groq por defecto).
@@ -62,7 +62,7 @@ final class MeetingProcessor {
     }
 
     private func markAuthError(_ error: GroqAPIError) {
-        authErrors[error.provider.id] = error.localizedDescription
+        authErrors[error.provider.credentialID] = error.localizedDescription
     }
 
     var isPaused: Bool {
@@ -96,7 +96,7 @@ final class MeetingProcessor {
 
     private func pauseForQuota(_ error: GroqAPIError) {
         let delay = max(AppSettings.quotaPause, error.retryAfter ?? 0)
-        pause(for: delay, reason: "En pausa por límite de cuota de Groq")
+        pause(for: delay, reason: "En pausa por límite de cuota de \(error.provider.keyLabel)")
     }
 
     /// Pausa preventiva: la respuesta indica que quedan pocos tokens en la ventana actual.
@@ -270,7 +270,7 @@ final class MeetingProcessor {
                     // Límite de cuota: el bloque vuelve a la cola y todo se pausa.
                     store.updateChunk(job.meetingID, index: job.index) { chunk in
                         chunk.status = .pending
-                        chunk.error = "En pausa por límite de cuota de Groq."
+                        chunk.error = "En pausa por límite de cuota de \(transcriptionProvider.keyLabel)."
                     }
                     pauseForQuota(quotaError)
                     return

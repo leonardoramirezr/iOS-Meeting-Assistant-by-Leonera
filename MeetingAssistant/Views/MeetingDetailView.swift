@@ -259,14 +259,14 @@ private struct MinutesSection: View {
         if meeting.isRecording || meeting.isTranscribing {
             StatusCard {
                 VStack(alignment: .leading, spacing: 8) {
-                    Text("Transcribiendo con Whisper…")
+                    Text("Transcribiendo…")
                         .font(.subheadline.weight(.semibold))
                     ProgressView(value: Double(meeting.transcribedCount), total: Double(max(meeting.chunks.count, 1)))
                     Text("\(meeting.transcribedCount) de \(meeting.chunks.count) bloques. La minuta se generará al terminar.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                     if !model.hasAPIKey {
-                        Text("Configura la API key de Groq en Ajustes para continuar.")
+                        Text("Configura la API key de \(AppSettings.transcriptionProvider.keyLabel) en Ajustes para continuar.")
                             .font(.caption)
                             .foregroundStyle(.orange)
                     }

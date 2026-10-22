@@ -17,7 +17,7 @@ struct RecordingView: View {
                             .frame(maxWidth: .infinity, alignment: .leading)
                     }
                     if !model.hasAPIKey {
-                        Label("Sin API key de Groq: los bloques se guardan y se transcribirán cuando la configures.",
+                        Label("Sin API key de \(AppSettings.transcriptionProvider.keyLabel): los bloques se guardan y se transcribirán cuando la configures.",
                               systemImage: "key.fill")
                             .font(.footnote)
                             .foregroundStyle(.orange)
@@ -130,7 +130,7 @@ private struct ChunkProgressCard: View {
             }
             ProgressView(value: progress)
                 .tint(.red)
-            Text("Cada \(Format.duration(recorder.chunkDuration)) se cierra el clip actual y se envía a Whisper mientras la grabación continúa en un clip nuevo.")
+            Text("Cada \(Format.duration(recorder.chunkDuration)) se cierra el clip actual y se envía a transcribir mientras la grabación continúa en un clip nuevo.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
