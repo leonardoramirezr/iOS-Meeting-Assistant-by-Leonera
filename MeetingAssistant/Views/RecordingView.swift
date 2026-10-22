@@ -176,6 +176,7 @@ private struct RecordedChunksList: View {
         case .pending: return chunk.error ?? "En cola para transcribir"
         case .transcribing: return "Transcribiendo…"
         case .failed: return chunk.error ?? "Error al transcribir"
+        case .deleted: return "Transcripción eliminada"
         case .done:
             let text = chunk.transcript ?? ""
             return text.isEmpty ? "(sin voz detectada)" : text
@@ -220,6 +221,9 @@ struct ChunkStatusIcon: View {
             case .failed:
                 Image(systemName: "exclamationmark.circle.fill")
                     .foregroundStyle(.orange)
+            case .deleted:
+                Image(systemName: "trash.circle")
+                    .foregroundStyle(.secondary)
             }
         }
         .frame(width: 20, height: 20)

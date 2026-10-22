@@ -5,6 +5,9 @@ enum ChunkStatus: String, Codable {
     case transcribing
     case done
     case failed
+    /// El usuario borró la transcripción; el audio se conserva y se vuelve a
+    /// transcribir al regenerar la transcripción.
+    case deleted
 }
 
 /// Un clip de audio de la grabación, transcrito de forma independiente.
@@ -77,6 +80,7 @@ struct Meeting: Codable, Identifiable, Hashable {
 
     var transcribedCount: Int { chunks.filter { $0.status == .done }.count }
     var failedCount: Int { chunks.filter { $0.status == .failed }.count }
+    var deletedCount: Int { chunks.filter { $0.status == .deleted }.count }
 
     /// Hay bloques esperando turno o subiéndose a Whisper.
     var isTranscribing: Bool {
@@ -84,7 +88,7 @@ struct Meeting: Codable, Identifiable, Hashable {
     }
 
     var allChunksTranscribed: Bool {
-        !chunks.isEmpty && chunks.allSatisfy { $0.status == .done }
+        !chunks.isEmpty && chunks.allSatisfy { $0.status == .done || $0.status == .deleted }
     }
 
     /// Transcripciones de los bloques en orden, separadas por `[TRANSCRIPTION CHUNK BOUNDARY]`.
